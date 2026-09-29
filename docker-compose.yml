@@ -1,0 +1,22 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: urdia-postgres
+    environment:
+      POSTGRES_USER: urdia
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: urdia
+    ports:
+      # Local-first: bind apenas ao loopback (Doc 08)
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - urdia_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U urdia -d urdia"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  urdia_postgres_data:
