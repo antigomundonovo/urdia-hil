@@ -5,7 +5,7 @@ from packages.shared.settings import Settings
 
 def test_database_url_composed_when_placeholder_unresolved():
     s = Settings(
-        postgres_user="urdia", postgres_password="secret", _env_file=None
+        postgres_user="urdia", postgres_password="secret", database_url=None, _env_file=None
     )
     assert s.effective_database_url == "postgresql+psycopg://urdia:secret@localhost:5432/urdia"
 

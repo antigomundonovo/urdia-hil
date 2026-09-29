@@ -40,8 +40,11 @@ def test_core_tables_exist(db_session: Session):
 def test_profile_unique_per_workspace(db_session: Session):
     ws = Workspace(name="iso-test-ws")
     u = User(name="seed")
+    db_session.add_all([ws, u])
+    db_session.flush()  # assign ids before children reference them
+
     p1 = Profile(workspace_id=ws.id, key="k", name="K")
-    db_session.add_all([ws, u, p1])
+    db_session.add(p1)
     db_session.flush()
 
     dup = Profile(workspace_id=ws.id, key="k", name="K2")
@@ -53,6 +56,9 @@ def test_profile_unique_per_workspace(db_session: Session):
 
 def test_job_checkpoint_roundtrip_and_audit_append(db_session: Session):
     ws = Workspace(name="job-test-ws")
+    db_session.add(ws)
+    db_session.flush()
+
     job = Job(
         workspace_id=ws.id,
         job_type=JobType.DISCOVERY_SCAN,
