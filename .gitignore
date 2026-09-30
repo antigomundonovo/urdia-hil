@@ -44,3 +44,4 @@ assets/temp/*
 Thumbs.db
 .idea/
 .vscode/
+.pytest_tmp/

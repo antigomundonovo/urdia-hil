@@ -30,6 +30,7 @@ include = ["apps*", "packages*", "scripts*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "--basetemp=.pytest_tmp"
 markers = [
     "integration: requires a running PostgreSQL with pgvector (docker compose up -d postgres)",
 ]
