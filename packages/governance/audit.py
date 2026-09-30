@@ -22,6 +22,7 @@ def append_audit(
     reason: str | None = None,
     rule_version: str | None = None,
     provider: str | None = None,
+    evidence_ids: list[Any] | None = None,
     metadata: dict[str, Any] | None = None,
 ):
     return AuditRepository(session).append(
@@ -36,5 +37,6 @@ def append_audit(
         reason=reason,
         rule_version=rule_version,
         provider=provider,
+        evidence_ids=evidence_ids,
         metadata=metadata,
     )

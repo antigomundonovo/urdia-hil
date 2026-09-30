@@ -50,3 +50,36 @@ def discovery_scan(ctx: ExecutionContext, payload: dict[str, Any], progress: Job
         "duplicates": sum(r.duplicates for r in reports),
         "failed": [str(r.source_id) for r in reports if r.status == "FAILED"],
     }
+
+
+def claim_verification(
+    ctx: ExecutionContext, payload: dict[str, Any], progress: JobProgress
+) -> dict:
+    """Recompute deterministic verdicts (Doc 16) for a story's claims — or all
+    profile claims when no story_id is given."""
+    from sqlalchemy import select
+
+    from packages.domain.knowledge import Claim
+    from packages.research.verification import KnowledgeService
+
+    progress.done("resolve_claims")
+    progress.next("verify")
+    workspace_id = uuid.UUID(str(payload["workspace_id"]))
+    profile_id = uuid.UUID(str(payload["profile_id"])) if payload.get("profile_id") else None
+    story_id = uuid.UUID(str(payload["story_id"])) if payload.get("story_id") else None
+
+    with SessionLocal() as session:
+        service = KnowledgeService(session)
+        stmt = select(Claim).where(Claim.workspace_id == workspace_id)
+        if story_id is not None:
+            stmt = stmt.where(Claim.story_id == story_id)
+        elif profile_id is not None:
+            stmt = stmt.where(Claim.profile_id == profile_id)
+        claims = list(session.scalars(stmt))
+        outcomes = {
+            str(claim.id): service.verify_claim(ctx, claim).verdict.value for claim in claims
+        }
+        session.commit()
+
+    progress.done("verify")
+    return {"verified": len(outcomes), "verdicts": outcomes}

@@ -16,9 +16,13 @@ from packages.shared.db import SessionLocal
 def build_handlers() -> dict:
     """Job handlers registered as milestones land (Doc 17 order).
     SOURCE_RETRIEVAL reuses the discovery scan for a single source."""
-    from apps.worker.handlers import discovery_scan
+    from apps.worker.handlers import claim_verification, discovery_scan
 
-    return {"DISCOVERY_SCAN": discovery_scan, "SOURCE_RETRIEVAL": discovery_scan}
+    return {
+        "DISCOVERY_SCAN": discovery_scan,
+        "SOURCE_RETRIEVAL": discovery_scan,
+        "CLAIM_VERIFICATION": claim_verification,
+    }
 
 
 def run_forever(poll_seconds: float = 2.0) -> int:
