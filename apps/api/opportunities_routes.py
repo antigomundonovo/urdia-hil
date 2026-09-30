@@ -12,7 +12,8 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from packages.domain.editorial import Opportunity
+from packages.domain.editorial import Opportunity, OpportunityClaim
+from packages.domain.knowledge import Claim
 from packages.domain.models import Profile
 from packages.research.opportunity import OpportunityService
 from packages.shared.db import get_session
@@ -127,4 +128,27 @@ def get_opportunity(
     opp = OpportunityService(session).get_scoped(opportunity_id, workspace_id)
     if opp is None:
         raise HTTPException(status_code=404, detail="opportunity not found")
-    return _payload(opp)
+    payload = _payload(opp)
+    claims = session.scalars(
+        select(Claim)
+        .join(OpportunityClaim, OpportunityClaim.ref_id == Claim.id)
+        .where(
+            OpportunityClaim.opportunity_id == opp.id,
+            OpportunityClaim.workspace_id == workspace_id,
+            Claim.workspace_id == workspace_id,
+        )
+        .order_by(Claim.created_at, Claim.id)
+    )
+    payload["claims"] = [
+        {
+            "id": str(claim.id),
+            "text": (
+                claim.editorial_wording
+                or claim.normalized_text
+                or f"{claim.subject or ''} {claim.predicate or ''} {claim.object or ''}".strip()
+            ),
+            "status": claim.status.value if hasattr(claim.status, "value") else str(claim.status),
+        }
+        for claim in claims
+    ]
+    return payload

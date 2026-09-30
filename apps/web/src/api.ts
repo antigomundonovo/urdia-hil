@@ -31,6 +31,7 @@ export interface Opportunity {
   priority: string | null;
   state: string;
   created_at: string;
+  claims?: { id: string; text: string; status: string }[];
 }
 
 export interface QcResult {

@@ -80,6 +80,12 @@ def _seed_full(db, world):
 
 def test_full_content_flow_through_api(client, db, world):
     opp_id, claim_id = _seed_full(db, world)
+    detail = client.get(
+        f"/api/v1/opportunities/{opp_id}?workspace_id={world[0].id}"
+    )
+    assert detail.status_code == 200
+    assert detail.json()["claims"][0]["id"] == str(claim_id)
+    assert "Bondinho" in detail.json()["claims"][0]["text"]
 
     created = client.post(
         f"/api/v1/opportunities/{opp_id}/create-content?workspace_id={world[0].id}",

@@ -12,8 +12,11 @@ export default function OpportunityDetail() {
   const [platform, setPlatform] = useState("instagram");
   const [qc, setQc] = useState<QcResult | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [exportPath, setExportPath] = useState<string | null>(null);
   const [format, setFormat] = useState("PHOTO_POST");
   const [packageId, setPackageId] = useState<string | null>(null);
+  const [usedClaimIds, setUsedClaimIds] = useState<string[]>([]);
   const [draftTitle, setDraftTitle] = useState("");
   const [draftCaption, setDraftCaption] = useState("");
 
@@ -27,8 +30,12 @@ export default function OpportunityDetail() {
   const runQc = useMutation({
     mutationFn: () =>
       api.post<QcResult>(`/api/v1/opportunities/${id}/run-qc?workspace_id=${workspaceId}`),
-    onSuccess: (result) => setQc(result),
-    onError: (e) => setMessage((e as Error).message),
+    onSuccess: async (result) => {
+      setQc(result);
+      setActionError(null);
+      await queryClient.invalidateQueries({ queryKey: ["opportunity", id] });
+    },
+    onError: (e) => setActionError((e as Error).message),
   });
   const approve = useMutation({
     mutationFn: () =>
@@ -36,7 +43,9 @@ export default function OpportunityDetail() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["opportunity", id] });
       setMessage("Aprovado — registrado no cartório.");
+      setActionError(null);
     },
+    onError: (e) => setActionError((e as Error).message),
   });
   const reject = useMutation({
     mutationFn: () =>
@@ -46,7 +55,22 @@ export default function OpportunityDetail() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["opportunity", id] });
       setMessage("Rejeitado — registrado no cartório.");
+      setActionError(null);
     },
+    onError: (e) => setActionError((e as Error).message),
+  });
+  const exportPackage = useMutation({
+    mutationFn: () =>
+      api.post<{ export_path: string; platform: string }>(
+        `/api/v1/content/${packageId}/export?workspace_id=${workspaceId}`,
+        { platform }
+      ),
+    onSuccess: (result) => {
+      setExportPath(result.export_path);
+      setMessage("Pacote exportado. A publicação na plataforma deve ser feita manualmente.");
+      setActionError(null);
+    },
+    onError: (e) => setActionError((e as Error).message),
   });
 
   if (!opp) return <p className="text-sm text-stone-400">carregando…</p>;
@@ -108,10 +132,16 @@ export default function OpportunityDetail() {
                 )
                 .then((r) => {
                   setPackageId(r.package_id);
+                  setUsedClaimIds([]);
+                  setQc(null);
+                  setExportPath(null);
+                  setActionError(null);
                   setMessage(`Pacote criado (${format}). Escreva o rascunho abaixo.`);
+                  queryClient.invalidateQueries({ queryKey: ["opportunity", id] });
                 })
-                .catch((e) => setMessage((e as Error).message))
+                .catch((e) => setActionError((e as Error).message))
             }
+            disabled={!!packageId}
             className="rounded border border-stone-300 px-4 py-2 text-sm font-medium hover:bg-stone-50"
           >
             Criar conteúdo
@@ -137,18 +167,58 @@ export default function OpportunityDetail() {
                 api
                   .post<{ draft_id: string }>(
                     `/api/v1/content/${packageId}/generate-draft?workspace_id=${workspaceId}`,
-                    { title: draftTitle, caption: draftCaption, claim_ids_used: [] }
+                    {
+                      title: draftTitle,
+                      caption: draftCaption,
+                      claim_ids_used: usedClaimIds,
+                    }
                   )
-                  .then(() => setMessage("Rascunho salvo — rode o QC e decida."))
-                  .catch((e) => setMessage((e as Error).message))
+                  .then(() => {
+                    setQc(null);
+                    setActionError(null);
+                    setMessage("Rascunho salvo — rode o QC e decida.");
+                    queryClient.invalidateQueries({ queryKey: ["opportunity", id] });
+                  })
+                  .catch((e) => setActionError((e as Error).message))
               }
               disabled={!draftTitle || !draftCaption}
               className="rounded bg-stone-900 px-4 py-2 text-sm font-medium text-white hover:bg-stone-700 disabled:opacity-40"
             >
               Salvar rascunho
             </button>
+            {opp.claims && opp.claims.length > 0 ? (
+              <fieldset className="space-y-2 rounded border border-stone-200 p-3">
+                <legend className="px-1 text-sm font-medium text-stone-700">
+                  Claims realmente usadas no rascunho
+                </legend>
+                {opp.claims.map((claim) => (
+                  <label key={claim.id} className="flex items-start gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={usedClaimIds.includes(claim.id)}
+                      onChange={(event) =>
+                        setUsedClaimIds((current) =>
+                          event.target.checked
+                            ? [...current, claim.id]
+                            : current.filter((claimId) => claimId !== claim.id)
+                        )
+                      }
+                      className="mt-1"
+                    />
+                    <span>
+                      {claim.text || "Claim sem descrição"}
+                      <span className="ml-2 text-xs text-stone-500">{claim.status}</span>
+                    </span>
+                  </label>
+                ))}
+              </fieldset>
+            ) : (
+              <p className="text-sm text-amber-800">
+                Nenhuma claim está vinculada. Adicione evidências antes de afirmar fatos.
+              </p>
+            )}
             <p className="text-xs text-stone-400">
-              O QC valida evidência e direitos pelas claims/assets já vinculados à oportunidade.
+              Selecione somente claims sustentadas que aparecem no texto; o QC bloqueará claims sem evidência.
             </p>
           </div>
         )}
@@ -161,7 +231,12 @@ export default function OpportunityDetail() {
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <button
             onClick={() => approve.mutate()}
-            disabled={approve.isPending}
+            disabled={
+              approve.isPending ||
+              opp.state !== "QUALITY_CONTROL" ||
+              !qc ||
+              !["PASS", "WARNING"].includes(qc.status)
+            }
             className="rounded bg-green-700 px-4 py-2 text-sm font-medium text-white hover:bg-green-800 disabled:opacity-50"
           >
             APROVAR
@@ -173,6 +248,15 @@ export default function OpportunityDetail() {
           >
             REJEITAR
           </button>
+          {packageId && (
+            <button
+              onClick={() => exportPackage.mutate()}
+              disabled={exportPackage.isPending || opp.state !== "READY"}
+              className="rounded border border-amber-700 px-4 py-2 text-sm font-medium text-amber-900 hover:bg-amber-50 disabled:opacity-50"
+            >
+              {exportPackage.isPending ? "Exportando…" : "Exportar pacote"}
+            </button>
+          )}
           <input
             value={platform}
             onChange={(e) => setPlatform(e.target.value)}
@@ -181,15 +265,24 @@ export default function OpportunityDetail() {
           />
           <button
             onClick={() => runQc.mutate()}
+            disabled={!packageId || runQc.isPending}
             className="rounded border border-stone-300 px-4 py-2 text-sm font-medium hover:bg-stone-50"
           >
-            Rodar QC
+            {runQc.isPending ? "Verificando…" : "Rodar QC"}
           </button>
         </div>
+        <p className="mt-2 text-xs text-stone-500">
+          A publicação direta ainda não está conectada; a exportação gera o pacote para publicação manual.
+        </p>
         {message && <p className="mt-3 text-sm text-green-700">{message}</p>}
-        {runQc.isError && (
-          <p className="mt-3 text-sm text-red-700">
-            QC indisponível para esta oportunidade: {(runQc.error as Error).message.slice(0, 140)}
+        {exportPath && (
+          <p role="status" className="mt-2 break-all text-xs text-stone-600">
+            Pasta exportada: {exportPath}
+          </p>
+        )}
+        {actionError && (
+          <p role="alert" className="mt-3 text-sm text-red-700">
+            {actionError}
           </p>
         )}
         {qc && (

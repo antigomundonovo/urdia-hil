@@ -46,6 +46,10 @@ POST /api/v1/opportunities/{id}/quarantine
 POST /api/v1/opportunities/{id}/reject
 ```
 
+`GET /api/v1/opportunities/{id}` returns attached claim IDs, editorial wording
+and verification status for the opportunity's workspace so the editor can
+record which claims the draft actually uses.
+
 ### Content
 ```http
 POST /api/v1/opportunities/{id}/create-content

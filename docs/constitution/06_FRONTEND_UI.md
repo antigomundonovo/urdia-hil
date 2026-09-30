@@ -122,6 +122,10 @@ Não construir voice-over ou editor audiovisual complexo na V1.
 
 ## QC UI
 Cada gate mostra `PASS / WARNING / FAIL` com razão. Não existir “ignore gate”.
+No editor, a pessoa seleciona explicitamente quais claims sustentadas aparecem
+no rascunho. QC válido é requisito para aprovação; qualquer mudança posterior
+exige novo QC e nova aprovação. A exportação para publicação manual só fica
+disponível após a aprovação; publicação direta depende de adapter configurado.
 
 ## Human Review
 Ações:
