@@ -15,12 +15,10 @@ router = APIRouter(prefix="/api/v1")
 
 @router.get("/profiles")
 def list_profiles(
-    workspace_id: UUID | None = Query(None),
+    workspace_id: UUID = Query(...),
     session: Session = Depends(get_session),
 ):
-    stmt = select(Profile).order_by(Profile.key)
-    if workspace_id is not None:
-        stmt = stmt.where(Profile.workspace_id == workspace_id)
+    stmt = select(Profile).where(Profile.workspace_id == workspace_id).order_by(Profile.key)
     rows = session.scalars(stmt).all()
     return {
         "profiles": [

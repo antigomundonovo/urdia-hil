@@ -4,6 +4,19 @@ import pytest
 from sqlalchemy import text
 
 
+@pytest.fixture(autouse=True)
+def bypass_workspace_auth_for_legacy_route_tests():
+    """Keep legacy endpoint tests focused; auth behavior has dedicated tests."""
+    from apps.api.auth import require_workspace_access
+    from apps.api.main import app
+
+    previous = app.dependency_overrides.copy()
+    app.dependency_overrides[require_workspace_access] = lambda: None
+    yield
+    app.dependency_overrides.clear()
+    app.dependency_overrides.update(previous)
+
+
 @pytest.fixture()
 def db():
     from packages.shared.db import SessionLocal

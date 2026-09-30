@@ -102,6 +102,15 @@ Health check: `GET /api/v1/health`
 
 Diagnóstico operacional: `python -m scripts.doctor` (ou `urdia-doctor`) imprime o ambiente e a URL do banco com senha mascarada para validar o bootstrap sem expor segredos em logs.
 
+## Conta e sessão
+
+Na interface, crie uma conta com e-mail e senha de pelo menos 12 caracteres.
+Cada cadastro recebe um workspace privado. A sessão usa cookie HttpOnly com
+expiração de 12 horas; use **Sair** para revogá-la. Endpoints de dados exigem
+sessão válida e membership no workspace. V1 ainda não tem verificação de
+e-mail, recuperação de senha ou conexão OAuth; não exponha o auto-cadastro
+publicamente antes dessas proteções de produção.
+
 ## Segurança obrigatória
 
 Aplicar desde a primeira linha: menor privilégio; isolamento por workspace/profile; fail-closed para autorização, rights e publicação; secrets fora do código, prompts, logs e frontend; validação de schema + semântica + policy; proteção contra prompt injection, SSRF, path traversal, command injection e SQL injection; audit trail append-only; checkpoints/recovery de jobs; fallback sem perda de evidência.

@@ -1,6 +1,6 @@
 /** API client — every call is workspace/profile-scoped server-side. */
 
-export const API_URL = import.meta.env.VITE_API_URL ?? "http://127.0.0.1:8000";
+export const API_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8000";
 
 export interface Profile {
   id: string;
@@ -9,6 +9,15 @@ export interface Profile {
   name: string;
   language: string | null;
   status: string | null;
+}
+
+export interface AuthContext {
+  user: { id: string; email: string; name: string | null };
+  workspaces: {
+    id: string;
+    name: string;
+    profile: Profile | null;
+  }[];
 }
 
 export interface Opportunity {
@@ -65,12 +74,14 @@ export interface CommentItem {
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const resp = await fetch(`${API_URL}${path}`, {
     headers: { "Content-Type": "application/json" },
+    credentials: "include",
     ...options,
   });
   if (!resp.ok) {
     const detail = await resp.text();
     throw new Error(`${resp.status}: ${detail}`);
   }
+  if (resp.status === 204) return undefined as T;
   return resp.json() as Promise<T>;
 }
 

@@ -38,6 +38,30 @@ class User(Base, TimestampMixin):
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
     name: Mapped[str | None] = mapped_column(String(255))
+    email: Mapped[str | None] = mapped_column(String(320))
+    password_hash: Mapped[str | None] = mapped_column(String(512))
+
+    __table_args__ = (UniqueConstraint("email", name="uq_users_email"),)
+
+
+class AuthSession(Base, TimestampMixin):
+    """Opaque, revocable URDIA login session; only a token digest is persisted."""
+
+    __tablename__ = "auth_sessions"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        UniqueConstraint("token_hash", name="uq_auth_sessions_token_hash"),
+        Index("ix_auth_sessions_user_id", "user_id"),
+        Index("ix_auth_sessions_expires_at", "expires_at"),
+    )
 
 
 class Workspace(Base, TimestampMixin):

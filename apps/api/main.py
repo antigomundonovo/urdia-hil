@@ -1,13 +1,11 @@
-"""FastAPI foundation (Doc 07): GET /api/v1/health with DB connectivity check.
+"""FastAPI foundation with local health, authentication, and scoped APIs."""
 
-Bound to 127.0.0.1 (Doc 08 — local initial binding). CORS is allowlist-based
-and added when the web app lands; never a wildcard for authenticated endpoints.
-"""
-
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from apps.api.analytics_routes import router as analytics_router
+from apps.api.auth import require_workspace_access
+from apps.api.auth_routes import router as auth_router
 from apps.api.content_routes import router as content_router
 from apps.api.jobs_routes import router as jobs_router
 from apps.api.opportunities_routes import router as opportunities_router
@@ -24,14 +22,16 @@ app.add_middleware(
     allow_origins=get_settings().cors_origin_list,  # explicit allowlist (Doc 08)
     allow_methods=["*"],
     allow_headers=["*"],
+    allow_credentials=True,
 )
-app.include_router(registry_router)
-app.include_router(jobs_router)
-app.include_router(profiles_router)
-app.include_router(opportunities_router)
-app.include_router(sources_router)
-app.include_router(content_router)
-app.include_router(analytics_router)
+app.include_router(auth_router)
+app.include_router(registry_router, dependencies=[Depends(require_workspace_access)])
+app.include_router(jobs_router, dependencies=[Depends(require_workspace_access)])
+app.include_router(profiles_router, dependencies=[Depends(require_workspace_access)])
+app.include_router(opportunities_router, dependencies=[Depends(require_workspace_access)])
+app.include_router(sources_router, dependencies=[Depends(require_workspace_access)])
+app.include_router(content_router, dependencies=[Depends(require_workspace_access)])
+app.include_router(analytics_router, dependencies=[Depends(require_workspace_access)])
 
 
 @app.get("/api/v1/health")

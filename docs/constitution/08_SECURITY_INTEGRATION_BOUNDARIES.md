@@ -62,6 +62,23 @@ prometido quando a API oficial daquele provider oferecer esse recurso.
 O logout afeta integrações pertencentes ao usuário que saiu, não as integrações
 de outros membros do workspace. Essa regra foi aprovada no AMENDMENT-2026-09-30-008.
 
+## URDIA account authentication
+V1 uses normalized email + password and creates a private workspace for each
+new account. Passwords use Argon2id; the API issues an opaque, random,
+HttpOnly/SameSite cookie and persists only its SHA-256 digest with a 12-hour
+expiry. Protected API routers require both a valid session and workspace
+membership; workspace IDs supplied by the browser are not authorization.
+Login failures are rate-limited per client IP. Session and auth responses are
+not cacheable. Unsafe browser requests require an exact allowed `Origin` to
+prevent cross-site request forgery; login responses do not distinguish unknown
+accounts from incorrect passwords.
+
+This local-first milestone does not yet implement email verification,
+password recovery, MFA, distributed rate-limit storage, or external account
+connections. Do not expose self-registration publicly until email verification
+and production-grade shared rate limiting are available. External OAuth tokens
+remain backend-only and are not implemented by this milestone.
+
 ## SSRF
 Para fetcher externo:
 - aceitar somente http/https;
