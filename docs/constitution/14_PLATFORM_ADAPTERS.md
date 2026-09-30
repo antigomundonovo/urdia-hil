@@ -17,6 +17,12 @@ last_verified
 status
 ```
 
+O contrato provider-neutral e o registry explícito ficam em
+`packages/providers/platforms.py`. Nenhum adapter de plataforma é habilitado
+por padrão: só registrar integrações após configurar credenciais oficiais,
+validar requisitos/limites documentados e testar revogação de conta. Tokens
+permanecem no backend; o core passa apenas referências opacas de credenciais.
+
 ## Platforms
 ```text
 Instagram
