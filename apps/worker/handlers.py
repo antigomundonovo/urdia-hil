@@ -24,14 +24,20 @@ def discovery_scan(ctx: ExecutionContext, payload: dict[str, Any], progress: Job
     workspace_id = uuid.UUID(str(payload["workspace_id"]))
     profile_id = uuid.UUID(str(payload["profile_id"])) if payload.get("profile_id") else None
     source_id = uuid.UUID(str(payload["source_id"])) if payload.get("source_id") else None
+    if workspace_id != ctx.workspace_id or profile_id != ctx.profile_id:
+        raise ValueError("discovery payload scope does not match job context")
 
     with SessionLocal() as session:
         fetcher = SafeFetcher()
         engine = DiscoveryEngine(session, fetcher)
         if source_id is not None:
             source = session.get(Source, source_id)
-            if source is None or source.workspace_id != workspace_id:
-                raise ValueError("source not found in workspace")
+            if (
+                source is None
+                or source.workspace_id != ctx.workspace_id
+                or source.profile_id != ctx.profile_id
+            ):
+                raise ValueError("source not found in job profile")
             sources = [source]
         elif profile_id is not None:
             sources = engine.active_sources(workspace_id, profile_id)

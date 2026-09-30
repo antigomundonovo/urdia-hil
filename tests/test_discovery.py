@@ -8,9 +8,11 @@ import httpx
 import pytest
 from sqlalchemy import select
 
+from packages.domain.enums import JobType
 from packages.domain.models import (
     DiscoveryCluster,
     DiscoveryItem,
+    Job,
     Profile,
     Retrieval,
     Source,
@@ -75,6 +77,48 @@ def test_unknown_and_unimplemented_adapters_fail_loudly():
     adapter = get_adapter("search", None)  # declared, not implemented yet
     with pytest.raises(AdapterError, match="not implemented"):
         adapter.fetch_items("http://x.test", None)
+
+
+def test_discovery_job_cannot_scan_source_from_another_profile(db, world):
+    from apps.worker.engine import JOB_FAILED, JobEngine
+    from apps.worker.handlers import discovery_scan
+
+    ws, profile = world
+    other_profile = Profile(
+        workspace_id=ws.id,
+        key="other",
+        name="Other",
+    )
+    db.add(other_profile)
+    db.flush()
+    source = Source(
+        workspace_id=ws.id,
+        profile_id=other_profile.id,
+        url="https://private.test/feed",
+        source_type="rss",
+    )
+    db.add(source)
+    db.flush()
+    job = Job(
+        workspace_id=ws.id,
+        profile_id=profile.id,
+        job_type=JobType.DISCOVERY_SCAN,
+        priority=999,
+        payload={
+            "workspace_id": str(ws.id),
+            "profile_id": str(profile.id),
+            "source_id": str(source.id),
+        },
+    )
+    db.add(job)
+    db.commit()
+
+    engine = JobEngine(db, {"DISCOVERY_SCAN": discovery_scan})
+    assert engine.claim_next() is job
+    engine.run_job(job)
+
+    assert job.status == JOB_FAILED
+    assert "source not found in job profile" in job.error
 
 
 def test_sitemap_adapter_reads_urlsets_and_indexes():
