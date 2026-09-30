@@ -24,6 +24,13 @@ def main() -> int:
     print(f"DATABASE_URL={settings.redacted_database_url}")
     print(f"API={settings.api_host}:{settings.api_port}")
 
+    issues = settings.validation_issues()
+    if issues:
+        print("ENV=INVALID")
+        for issue in issues:
+            print(f" - {issue}")
+        return 2
+
     try:
         engine = create_engine(url, pool_pre_ping=True, connect_args={"connect_timeout": 5})
         with engine.connect() as conn:

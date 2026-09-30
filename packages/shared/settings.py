@@ -68,6 +68,15 @@ class Settings(BaseSettings):
             netloc = f"{netloc}:{parsed.port}"
         return urlunsplit((parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment))
 
+    def validation_issues(self) -> list[str]:
+        """Return actionable configuration errors before a DB connection is attempted."""
+        issues: list[str] = []
+        if not self.postgres_password or self.postgres_password == "${POSTGRES_PASSWORD}":
+            issues.append("POSTGRES_PASSWORD is missing or unresolved in .env")
+        if self.database_url and "${" in self.database_url:
+            issues.append("DATABASE_URL still contains an unresolved environment placeholder")
+        return issues
+
 
 @lru_cache
 def get_settings() -> Settings:
