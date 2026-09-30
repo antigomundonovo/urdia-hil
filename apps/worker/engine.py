@@ -158,7 +158,7 @@ class JobEngine:
             )
         except FatalJobError as exc:
             self._fail(job, str(exc), ctx=ctx)
-        except Exception as exc:
+        except RetryableJobError as exc:
             max_attempts = job.max_attempts or self.default_max_attempts
             if (job.attempt or 1) >= max_attempts:
                 self._fail(
@@ -180,6 +180,14 @@ class JobEngine:
                     reason=str(exc),
                     metadata={"attempt": job.attempt},
                 )
+        except Exception as exc:
+            # Unclassified failures fail closed; only explicitly transient
+            # conditions may consume a retry.
+            self._fail(
+                job,
+                f"unclassified {exc.__class__.__name__}: {exc}",
+                ctx=ctx,
+            )
         self.session.flush()
         return job
 

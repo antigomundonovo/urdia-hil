@@ -158,6 +158,22 @@ def test_fatal_failure_never_retries(db, world):
     assert "rights block" in job.error
 
 
+def test_unclassified_failure_fails_without_retry(db, world):
+    ws, profile = world
+
+    def unclassified(ctx, payload, progress):
+        raise ValueError("invalid payload")
+
+    job = _make_job(db, ws, profile, max_attempts=5)
+    engine = JobEngine(db, {str(job.job_type): unclassified})
+    engine.claim_next()
+    engine.run_job(job)
+
+    assert job.status == JOB_FAILED
+    assert job.attempt == 1
+    assert "unclassified ValueError" in job.error
+
+
 def test_retry_ceiling_fails_job(db, world):
     ws, profile = world
 
