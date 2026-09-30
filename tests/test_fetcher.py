@@ -120,6 +120,28 @@ def test_size_limit_blocked():
         _fetcher(client, max_bytes=2_000_000).fetch("http://public.test/big")
 
 
+def test_size_limit_stops_reading_stream_after_limit_is_exceeded():
+    class CountingStream(httpx.SyncByteStream):
+        def __init__(self):
+            self.chunks_yielded = 0
+
+        def __iter__(self):
+            self.chunks_yielded += 1
+            yield b"oversized"
+            self.chunks_yielded += 1
+            yield b"must-not-be-read"
+
+    stream = CountingStream()
+    client = _transport(
+        {"http://public.test/big": httpx.Response(200, stream=stream)}
+    )
+
+    with pytest.raises(FetchBlockedError, match="too large"):
+        _fetcher(client, max_bytes=4).fetch("http://public.test/big")
+
+    assert stream.chunks_yielded == 1
+
+
 def test_conditional_request_surfaces_validators():
     client = _transport(
         {"http://public.test/feed": httpx.Response(304, headers={"etag": '"v2"'})}
