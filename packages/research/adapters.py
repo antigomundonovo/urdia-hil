@@ -1,18 +1,14 @@
-"""Source adapters (Doc 09): RSS, Atom, Sitemap, Search, GDELT, Wikidata,
-Wikipedia, OpenAlex, Crossref, Wayback, Internet Archive, Wikimedia.
-
-V1 implements RSS/Atom, Sitemap, Crossref and OpenAlex without new
-dependencies. Remaining adapter types are declared by the spec and raise
-AdapterError when invoked; they never fail silently.
-"""
+"""Source adapters (Doc 09); source catalogs return leads, never evidence."""
 
 import hashlib
 import json
 import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
+from datetime import datetime
+from html.parser import HTMLParser
 from typing import Any, Protocol
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 from packages.research.fetcher import FetchResult, SafeFetcher
 
@@ -287,6 +283,35 @@ def _first_text(value: Any) -> str | None:
             None,
         )
     return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+class _TextExtractor(HTMLParser):
+    _BLOCK_TAGS = frozenset({"br", "div", "li", "p"})
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in self._BLOCK_TAGS:
+            self.parts.append(" ")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in self._BLOCK_TAGS:
+            self.parts.append(" ")
+
+    def handle_data(self, data: str) -> None:
+        self.parts.append(data)
+
+
+def _plain_text(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    extractor = _TextExtractor()
+    extractor.feed(value)
+    extractor.close()
+    text = " ".join("".join(extractor.parts).split())
+    return text or None
 
 
 def _date_from_crossref(record: dict[str, Any]) -> str | None:
@@ -567,17 +592,218 @@ class WikidataAdapter(_FetchingAdapter):
         return items
 
 
+class WaybackAdapter(_FetchingAdapter):
+    source_type = "wayback"
+
+    def fetch_items(
+        self,
+        source_url: str,
+        fetcher: SafeFetcher | None = None,
+        *,
+        etag: str | None = None,
+        last_modified: str | None = None,
+    ) -> list[RawItem]:
+        result = self._fetch(
+            source_url, fetcher, etag=etag, last_modified=last_modified
+        )
+        if result.status_code == 304:
+            return []
+        _require_success(result, self.source_type)
+        try:
+            rows = json.loads(result.content)
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise AdapterError("invalid Wayback CDX JSON response") from exc
+        if not isinstance(rows, list):
+            raise AdapterError("Wayback CDX response must be a JSON array")
+        if not rows:
+            return []
+        if not isinstance(rows[0], list) or "timestamp" not in rows[0]:
+            raise AdapterError("Wayback CDX response is missing its field header")
+        fields = rows[0]
+        if any(not isinstance(field, str) for field in fields):
+            raise AdapterError("Wayback CDX field header is invalid")
+        items: list[RawItem] = []
+        for row in rows[1:]:
+            if not isinstance(row, list) or len(row) != len(fields):
+                continue
+            capture = dict(zip(fields, row, strict=True))
+            original = capture.get("original")
+            timestamp = capture.get("timestamp")
+            if (
+                not isinstance(original, str)
+                or not _is_http_url(original)
+                or not isinstance(timestamp, str)
+                or not re.fullmatch(r"\d{14}", timestamp)
+            ):
+                continue
+            try:
+                datetime.strptime(timestamp, "%Y%m%d%H%M%S")
+            except ValueError:
+                continue
+            archived_url = f"https://web.archive.org/web/{timestamp}id_/{original}"
+            items.append(
+                RawItem(
+                    url=archived_url,
+                    title=original,
+                    published_at=timestamp,
+                    raw={
+                        "source": self.source_type,
+                        "original_url": original,
+                        "timestamp": timestamp,
+                        "status_code": capture.get("statuscode"),
+                        "mime_type": capture.get("mimetype"),
+                        "digest": capture.get("digest"),
+                    },
+                )
+            )
+        return items
+
+
+class InternetArchiveAdapter(_FetchingAdapter):
+    source_type = "internet_archive"
+
+    def fetch_items(
+        self,
+        source_url: str,
+        fetcher: SafeFetcher | None = None,
+        *,
+        etag: str | None = None,
+        last_modified: str | None = None,
+    ) -> list[RawItem]:
+        result = self._fetch(
+            source_url, fetcher, etag=etag, last_modified=last_modified
+        )
+        if result.status_code == 304:
+            return []
+        payload = _parse_json_result(result, self.source_type)
+        response = payload.get("response")
+        records = response.get("docs") if isinstance(response, dict) else None
+        if not isinstance(records, list):
+            raise AdapterError("Internet Archive response is missing response.docs")
+        items: list[RawItem] = []
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            identifier = record.get("identifier")
+            if (
+                not isinstance(identifier, str)
+                or not identifier
+                or len(identifier) > 255
+                or not re.fullmatch(r"[A-Za-z0-9._-]+", identifier)
+            ):
+                continue
+            items.append(
+                RawItem(
+                    url=f"https://archive.org/details/{quote(identifier, safe='')}",
+                    title=_first_text(record.get("title")),
+                    summary=_plain_text(_first_text(record.get("description"))),
+                    published_at=(
+                        record.get("date") if isinstance(record.get("date"), str) else None
+                    ),
+                    raw={
+                        "source": self.source_type,
+                        "identifier": identifier,
+                        "mediatype": record.get("mediatype"),
+                        "creator": record.get("creator"),
+                    },
+                )
+            )
+        return items
+
+
+class WikimediaAdapter(_FetchingAdapter):
+    source_type = "wikimedia"
+
+    def fetch_items(
+        self,
+        source_url: str,
+        fetcher: SafeFetcher | None = None,
+        *,
+        etag: str | None = None,
+        last_modified: str | None = None,
+    ) -> list[RawItem]:
+        result = self._fetch(
+            source_url, fetcher, etag=etag, last_modified=last_modified
+        )
+        if result.status_code == 304:
+            return []
+        payload = _parse_json_result(result, self.source_type)
+        query = payload.get("query")
+        pages = query.get("pages") if isinstance(query, dict) else None
+        if isinstance(pages, dict):
+            records = list(pages.values())
+        elif isinstance(pages, list):
+            records = pages
+        else:
+            raise AdapterError("Wikimedia response is missing query.pages")
+        items: list[RawItem] = []
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            page_url = record.get("canonicalurl")
+            if not isinstance(page_url, str) or not _is_http_url(page_url):
+                continue
+            image_info = record.get("imageinfo")
+            image = image_info[0] if isinstance(image_info, list) and image_info else {}
+            if not isinstance(image, dict):
+                image = {}
+            metadata = image.get("extmetadata")
+            if not isinstance(metadata, dict):
+                metadata = {}
+            items.append(
+                RawItem(
+                    url=page_url,
+                    title=record.get("title") if isinstance(record.get("title"), str) else None,
+                    summary=_plain_text(
+                        metadata.get("ImageDescription", {}).get("value")
+                        if isinstance(metadata.get("ImageDescription"), dict)
+                        else None
+                    ),
+                    raw={
+                        "source": self.source_type,
+                        "page_id": record.get("pageid"),
+                        "file_url": image.get("url"),
+                        "creator": _plain_text(
+                            metadata.get("Artist", {}).get("value")
+                            if isinstance(metadata.get("Artist"), dict)
+                            else None
+                        ),
+                        "license": _plain_text(
+                            metadata.get("LicenseShortName", {}).get("value")
+                            if isinstance(metadata.get("LicenseShortName"), dict)
+                            else None
+                        ),
+                        "license_url": _plain_text(
+                            metadata.get("LicenseUrl", {}).get("value")
+                            if isinstance(metadata.get("LicenseUrl"), dict)
+                            else None
+                        ),
+                    },
+                )
+            )
+        return items
+
+
 # --- declared-but-not-yet-implemented adapters ---------------------------
 
 _DECLARED_LATER = (
     "search",
-    "wayback",
-    "internet_archive",
-    "wikimedia",
 )
 
 SUPPORTED_SOURCE_TYPES = frozenset(
-    {"rss", "atom", "sitemap", "crossref", "openalex", "gdelt", "wikipedia", "wikidata"}
+    {
+        "rss",
+        "atom",
+        "sitemap",
+        "crossref",
+        "openalex",
+        "gdelt",
+        "wikipedia",
+        "wikidata",
+        "wayback",
+        "internet_archive",
+        "wikimedia",
+    }
 )
 
 
@@ -616,6 +842,12 @@ def get_adapter(source_type: str, fetcher: SafeFetcher) -> SourceAdapter:
         return WikipediaAdapter(fetcher)
     if source_type == "wikidata":
         return WikidataAdapter(fetcher)
+    if source_type == "wayback":
+        return WaybackAdapter(fetcher)
+    if source_type == "internet_archive":
+        return InternetArchiveAdapter(fetcher)
+    if source_type == "wikimedia":
+        return WikimediaAdapter(fetcher)
     if source_type in _DECLARED_LATER:
         return NotImplementedAdapter(source_type)
     raise AdapterError(f"unknown source_type: {source_type}")

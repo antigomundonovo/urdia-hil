@@ -72,7 +72,7 @@ def test_parse_feed_rss_and_atom():
 def test_unknown_and_unimplemented_adapters_fail_loudly():
     with pytest.raises(AdapterError):
         get_adapter("facebook", None)  # not in Doc 09 list
-    adapter = get_adapter("internet_archive", None)  # declared, not implemented yet
+    adapter = get_adapter("search", None)  # declared, not implemented yet
     with pytest.raises(AdapterError, match="not implemented"):
         adapter.fetch_items("http://x.test", None)
 
@@ -91,7 +91,7 @@ def test_sitemap_adapter_reads_urlsets_and_indexes():
               <url><loc>https://museum.test/item/1</loc><lastmod>2026-09-30</lastmod></url>
               <url><loc>https://museum.test/item/2</loc></url>
             </urlset>""",
-        }
+        },
     )
 
     items = SitemapAdapter(fetcher).fetch_items(index_url)
@@ -298,6 +298,157 @@ def test_gdelt_wikipedia_and_wikidata_normalize_search_results():
     assert wikipedia[0].raw["page_id"] == 42
     assert wikidata[0].url == "https://www.wikidata.org/wiki/Q42"
     assert wikidata[0].summary == "objeto arquivístico"
+
+
+def test_wayback_and_internet_archive_normalize_archive_results():
+    from packages.research.adapters import InternetArchiveAdapter, WaybackAdapter
+
+    wayback_url = "http://public.test/cdx"
+    archive_url = "http://public.test/archive"
+    fetcher = _fetcher_for(
+        {
+            wayback_url: json.dumps(
+                [
+                    ["timestamp", "original", "statuscode", "mimetype", "digest"],
+                    [
+                        "19500102030405",
+                        "https://archive.test/document",
+                        "200",
+                        "text/html",
+                        "sha1:abcd",
+                    ],
+                    ["malformed"],
+                    [
+                        "20201399000000",
+                        "https://archive.test/invalid-date",
+                        "200",
+                        "text/html",
+                        "sha1:no",
+                    ],
+                    [
+                        "20200101000000",
+                        "file:///private/item",
+                        "200",
+                        "text/html",
+                        "sha1:no",
+                    ],
+                ]
+            ).encode(),
+            archive_url: json.dumps(
+                {
+                    "response": {
+                        "docs": [
+                            {
+                                "identifier": "historical_document_1",
+                                "title": ["Documento Histórico"],
+                                "description": ["<p>Registro <b>catalogado</b>.</p>"],
+                                "date": "1950",
+                                "mediatype": "texts",
+                                "creator": ["Arquivo Nacional"],
+                            },
+                            {"identifier": "../outside", "title": "Reject"},
+                        ]
+                    }
+                }
+            ).encode(),
+        }
+    )
+
+    captures = WaybackAdapter(fetcher).fetch_items(wayback_url)
+    records = InternetArchiveAdapter(fetcher).fetch_items(archive_url)
+
+    assert len(captures) == 1
+    assert captures[0].url == (
+        "https://web.archive.org/web/19500102030405id_/https://archive.test/document"
+    )
+    assert captures[0].raw["original_url"] == "https://archive.test/document"
+    assert captures[0].raw["digest"] == "sha1:abcd"
+    assert len(records) == 1
+    assert records[0].url == "https://archive.org/details/historical_document_1"
+    assert records[0].title == "Documento Histórico"
+    assert records[0].summary == "Registro catalogado."
+    assert records[0].raw["creator"] == ["Arquivo Nacional"]
+
+
+def test_wikimedia_normalizes_commons_provenance_metadata():
+    from packages.research.adapters import WikimediaAdapter
+
+    url = "http://public.test/commons"
+    fetcher = _fetcher_for(
+        {
+            url: json.dumps(
+                {
+                    "query": {
+                        "pages": {
+                            "99": {
+                                "pageid": 99,
+                                "title": "File:Photo.jpg",
+                                "canonicalurl": (
+                                    "https://commons.wikimedia.org/wiki/File:Photo.jpg"
+                                ),
+                                "imageinfo": [
+                                    {
+                                        "url": "https://upload.wikimedia.org/file.jpg",
+                                        "extmetadata": {
+                                            "ImageDescription": {
+                                                "value": "<p>Imagem de &amp; arquivo.</p>"
+                                            },
+                                            "Artist": {"value": "<a>Fotógrafa</a>"},
+                                            "LicenseShortName": {"value": "CC BY-SA 4.0"},
+                                            "LicenseUrl": {
+                                                "value": "<a>https://creativecommons.org/licenses/by-sa/4.0/</a>"
+                                            },
+                                        },
+                                    }
+                                ],
+                            },
+                            "100": {
+                                "pageid": 100,
+                                "title": "File:Unsafe.jpg",
+                                "canonicalurl": "javascript:alert(1)",
+                            },
+                        }
+                    }
+                }
+            ).encode()
+        }
+    )
+
+    items = WikimediaAdapter(fetcher).fetch_items(url)
+
+    assert len(items) == 1
+    assert items[0].summary == "Imagem de & arquivo."
+    assert items[0].raw["file_url"] == "https://upload.wikimedia.org/file.jpg"
+    assert items[0].raw["creator"] == "Fotógrafa"
+    assert items[0].raw["license"] == "CC BY-SA 4.0"
+    assert items[0].raw["license_url"] == "https://creativecommons.org/licenses/by-sa/4.0/"
+
+
+@pytest.mark.parametrize(
+    ("adapter_name", "body"),
+    [
+        ("wayback", b'{"not":"a CDX array"}'),
+        ("internet_archive", b'{"response":{"unexpected":[]}}'),
+        ("wikimedia", b'{"query":{"unexpected":[]}}'),
+    ],
+)
+def test_archive_adapters_reject_malformed_catalog_responses(adapter_name, body):
+    from packages.research.adapters import (
+        InternetArchiveAdapter,
+        WaybackAdapter,
+        WikimediaAdapter,
+    )
+
+    adapters = {
+        "wayback": WaybackAdapter,
+        "internet_archive": InternetArchiveAdapter,
+        "wikimedia": WikimediaAdapter,
+    }
+    url = f"http://public.test/{adapter_name}"
+    adapter = adapters[adapter_name](_fetcher_for({url: body}))
+
+    with pytest.raises(AdapterError):
+        adapter.fetch_items(url)
 
 
 @pytest.fixture()

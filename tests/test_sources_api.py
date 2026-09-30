@@ -102,7 +102,7 @@ def test_retrieve_rejects_declared_but_unimplemented_adapter(client, db, world):
         workspace_id=ws.id,
         profile_id=profile.id,
         url="https://archive.test/query",
-        source_type="internet_archive",
+        source_type="search",
     )
     db.add(source)
     db.flush()

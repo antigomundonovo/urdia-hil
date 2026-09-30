@@ -13,9 +13,9 @@ const SOURCE_TYPES = [
   { value: "wikipedia", available: true },
   { value: "openalex", available: true },
   { value: "crossref", available: true },
-  { value: "wayback", available: false },
-  { value: "internet_archive", available: false },
-  { value: "wikimedia", available: false },
+  { value: "wayback", available: true },
+  { value: "internet_archive", available: true },
+  { value: "wikimedia", available: true },
 ];
 const AVAILABLE_SOURCE_TYPES = new Set(
   SOURCE_TYPES.filter((sourceType) => sourceType.available).map((sourceType) => sourceType.value),

@@ -21,12 +21,13 @@ Wikimedia
 
 Implementados na V1: RSS/Atom, sitemap (URL set e índice com limites de
 documentos/itens), GDELT, pesquisa da API MediaWiki, pesquisa Wikidata e
-metadados acadêmicos Crossref/OpenAlex. Search, Wayback, Internet Archive e
-Wikimedia permanecem explicitamente indisponíveis até terem adaptadores e
-testes próprios. Resultados desses catálogos e índices são leads de descoberta,
-nunca evidência por si só. XML externo é rejeitado e todas as requisições usam
-o SafeFetcher, com validação de redirect, tamanho, timeout, robots e limite por
-host.
+metadados acadêmicos Crossref/OpenAlex, Wayback CDX, Internet Archive e
+metadados de arquivos do Wikimedia Commons. A pesquisa geral permanece
+explicitamente indisponível até ter adaptador e testes próprios. Resultados
+desses catálogos e índices são leads de descoberta, nunca evidência por si só;
+metadados de licença do Commons também não substituem a verificação de direitos.
+XML externo é rejeitado e todas as requisições usam o SafeFetcher, com validação
+de redirect, tamanho, timeout, robots e limite por host.
 Retrievals bem-sucedidos persistem ETag e Last-Modified; varreduras seguintes
 enviam validadores condicionais e registram HTTP 304 sem reprocessar resultados.
 Tipos de fonte ainda sem adaptador podem ser cadastrados, mas a API rejeita a
