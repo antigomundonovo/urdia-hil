@@ -40,6 +40,21 @@ export interface Source {
   status: string;
 }
 
+export interface Job {
+  id: string;
+  workspace_id: string;
+  profile_id: string | null;
+  job_type: string;
+  status: string;
+  attempt: number | null;
+  max_attempts: number | null;
+  checkpoint: { completed_steps?: string[]; next_step?: string | null } | null;
+  error: string | null;
+  created_at: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
 export interface CommentItem {
   id: string;
   intent: string | null;

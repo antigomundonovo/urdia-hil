@@ -7,11 +7,13 @@ import OpportunityDetail from "./pages/OpportunityDetail";
 import Sources from "./pages/Sources";
 import Analytics from "./pages/Analytics";
 import Learning from "./pages/Learning";
+import Jobs from "./pages/Jobs";
 
 const NAV = [
   { to: "/", label: "Painel" },
   { to: "/oportunidades", label: "Oportunidades" },
   { to: "/fontes", label: "Fontes" },
+  { to: "/jobs", label: "Jobs" },
   { to: "/analytics", label: "Analytics" },
   { to: "/learning", label: "Learning" },
 ];
@@ -58,6 +60,7 @@ export default function App() {
           <Route path="/oportunidades" element={<Opportunities />} />
           <Route path="/oportunidades/:id" element={<OpportunityDetail />} />
           <Route path="/fontes" element={<Sources />} />
+          <Route path="/jobs" element={<Jobs />} />
           <Route path="/analytics" element={<Analytics />} />
           <Route path="/learning" element={<Learning />} />
         </Routes>
