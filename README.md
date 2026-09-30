@@ -22,6 +22,14 @@ A **Constituição** (`docs/constitution/00_HIL_MASTER_CONSTITUTION_V1.0.md`) é
 
 Leia na ordem definida em [`docs/constitution/README_START_HERE.md`](docs/constitution/README_START_HERE.md).
 
+### Classificação auxiliar opcional
+
+Laya pode ser habilitada como provider opcional de decisões tipadas, sempre
+consultivas e sem autoridade sobre fatos, direitos, QC ou publicação. Instalação,
+ativação explícita, limites e licença estão documentados em
+[`docs/LAYA_INTEGRATION.md`](docs/LAYA_INTEGRATION.md); a instalação normal do
+URDIA não instala essa dependência nem baixa modelos.
+
 ### Regra de autoridade
 
 Quando houver contradição:
