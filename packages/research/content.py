@@ -11,6 +11,7 @@ rights/, platform_variants/, manifest.json. Manifest records versions for
 determinism.
 """
 
+import hashlib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -36,6 +37,8 @@ from packages.domain.enums import (
     UncertaintyState,
 )
 from packages.domain.knowledge import Claim, EvidenceRecord
+from packages.domain.models import AuditEvent
+from packages.domain.repositories import AuditRepository
 from packages.governance.audit import append_audit
 from packages.research.opportunity import OpportunityService
 from packages.research.rights import rights_gate
@@ -51,6 +54,144 @@ class ContentService:
         self.session = session
         self.opps = OpportunityService(session)
         self.export_root = Path(export_root) if export_root else None
+
+    def _require_current_passing_qc(
+        self, ctx: ExecutionContext, opp: Opportunity
+    ) -> ContentPackage:
+        package = self.session.scalars(
+            select(ContentPackage)
+            .where(ContentPackage.opportunity_id == opp.id)
+            .order_by(ContentPackage.created_at.desc())
+            .limit(1)
+        ).first()
+        if package is None:
+            raise PublicationBlocked("content package has no passing QC")
+
+        current_fingerprint = self._qc_input_fingerprint(package, opp)
+        qc_events = self.session.scalars(
+            select(AuditEvent)
+            .where(
+                AuditEvent.workspace_id == ctx.workspace_id,
+                AuditEvent.action == "QC_RUN",
+                AuditEvent.entity_type == "content_package",
+                AuditEvent.entity_id == package.id,
+            )
+        )
+        if not any(
+            event.new_state in (GateResult.PASS.value, GateResult.WARNING.value)
+            and (event.metadata_ or {}).get("input_fingerprint") == current_fingerprint
+            for event in qc_events
+        ):
+            raise PublicationBlocked("content package requires a current passing QC")
+        return package
+
+    def _qc_input_fingerprint(self, package: ContentPackage, opp: Opportunity) -> str:
+        canonical = self.session.get(CanonicalContent, package.canonical_content_id)
+        drafts = list(
+            self.session.scalars(
+                select(Draft).where(Draft.content_package_id == package.id)
+            )
+        )
+        drafts.sort(key=lambda draft: str(draft.id))
+        claim_ids = {
+            str(claim_id)
+            for draft in drafts
+            for claim_id in (draft.claim_ids_used or [])
+        }
+        claims = list(
+            self.session.scalars(select(Claim).where(Claim.id.in_(claim_ids)))
+        ) if claim_ids else []
+        claims.sort(key=lambda claim: str(claim.id))
+        evidence = list(
+            self.session.scalars(
+                select(EvidenceRecord).where(
+                    EvidenceRecord.claim_id.in_([claim.id for claim in claims])
+                )
+            )
+        ) if claims else []
+        evidence.sort(key=lambda record: str(record.id))
+
+        from packages.domain.editorial import OpportunityAsset, PlatformPlan
+
+        asset_ids = sorted(
+            self.session.scalars(
+                select(OpportunityAsset.ref_id).where(
+                    OpportunityAsset.opportunity_id == opp.id
+                )
+            ),
+            key=str,
+        )
+        rights = []
+        for asset_id in asset_ids:
+            records = list(
+                self.session.scalars(
+                    select(RightsRecord).where(RightsRecord.asset_id == asset_id)
+                )
+            )
+            records.sort(key=lambda record: str(record.id))
+            rights.extend(records)
+        plans = list(
+            self.session.scalars(
+                select(PlatformPlan).where(PlatformPlan.opportunity_id == opp.id)
+            )
+        )
+        plans.sort(key=lambda plan: str(plan.id))
+
+        fingerprint_data = {
+            "qc_version": 1,
+            "package": {"id": str(package.id), "format": package.format},
+            "canonical": (
+                {
+                    "editorial_angle": canonical.editorial_angle,
+                    "key_message": canonical.key_message,
+                    "seo_entities": canonical.seo_entities,
+                }
+                if canonical
+                else None
+            ),
+            "drafts": [
+                {
+                    "id": str(draft.id),
+                    "title": draft.title,
+                    "caption": draft.caption,
+                    "payload": draft.payload,
+                    "claim_ids_used": draft.claim_ids_used,
+                }
+                for draft in drafts
+            ],
+            "claims": [
+                {"id": str(claim.id), "status": str(claim.status)}
+                for claim in claims
+            ],
+            "evidence": [
+                {
+                    "id": str(record.id),
+                    "claim_id": str(record.claim_id),
+                    "supports": record.supports,
+                    "excerpt": record.excerpt,
+                    "source_id": str(record.source_id),
+                }
+                for record in evidence
+            ],
+            "assets": [str(asset_id) for asset_id in asset_ids],
+            "rights": [
+                {
+                    "id": str(record.id),
+                    "asset_id": str(record.asset_id),
+                    "classification": record.classification,
+                    "status": record.status,
+                }
+                for record in rights
+            ],
+            "platform_plans": [
+                {"platform": plan.platform, "method": plan.method}
+                for plan in plans
+            ],
+        }
+        serialized = json.dumps(
+            fingerprint_data, sort_keys=True, separators=(",", ":"), default=str
+        )
+        return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
 
     # --- canonical → package → draft ---------------------------------------
 
@@ -92,6 +233,13 @@ class ContentService:
         claim_ids_used: list | None = None,
         payload: dict | None = None,
     ) -> Draft:
+        opp = self.session.get(Opportunity, package.opportunity_id)
+        if opp is None or opp.state not in (
+            OpportunityState.FORMAT_SELECTED.value,
+            OpportunityState.PLATFORM_SELECTED.value,
+            OpportunityState.DRAFTING.value,
+        ):
+            raise PublicationBlocked("content cannot be edited after QC has started")
         draft = Draft(
             workspace_id=ctx.workspace_id,
             content_package_id=package.id,
@@ -102,7 +250,6 @@ class ContentService:
         )
         self.session.add(draft)
         self.session.flush()
-        opp = self.session.get(Opportunity, package.opportunity_id)
         pre_draft = (
             OpportunityState.FORMAT_SELECTED.value,
             OpportunityState.PLATFORM_SELECTED.value,
@@ -130,7 +277,10 @@ class ContentService:
         opp = self.session.get(Opportunity, package.opportunity_id)
         canonical = self.session.get(CanonicalContent, package.canonical_content_id)
         draft = self.session.scalars(
-            select(Draft).where(Draft.content_package_id == package.id).limit(1)
+            select(Draft)
+            .where(Draft.content_package_id == package.id)
+            .order_by(Draft.created_at.desc(), Draft.id.desc())
+            .limit(1)
         ).first()
 
         def _set(gate: QualityGate, result: GateResult, note: str | None = None):
@@ -307,7 +457,10 @@ class ContentService:
             entity_type="content_package",
             entity_id=package.id,
             new_state=overall.value,
-            metadata={"gates": gates},
+            metadata={
+                "gates": gates,
+                "input_fingerprint": self._qc_input_fingerprint(package, opp),
+            },
         )
         if opp.state == OpportunityState.DRAFTING.value and overall is not GateResult.FAIL:
             self.opps.advance_to(ctx, opp, OpportunityState.QUALITY_CONTROL, reason="QC")
@@ -318,6 +471,9 @@ class ContentService:
     def approve(self, ctx: ExecutionContext, opp: Opportunity, approved_by=None) -> Opportunity:
         """APPROVE: human authority (Doc 05/06). Moves QUALITY_CONTROL →
         HUMAN_REVIEW → READY. Approval is audited with the actor."""
+        if opp.state != OpportunityState.QUALITY_CONTROL.value:
+            raise PublicationBlocked("human approval requires completed QC")
+        self._require_current_passing_qc(ctx, opp)
         current = OpportunityState(opp.state)
         if current is OpportunityState.QUALITY_CONTROL:
             self.opps.transition(
@@ -355,9 +511,15 @@ class ContentService:
     def publisher_gate(self, ctx: ExecutionContext, package: ContentPackage, platform: str) -> dict:
         """READY + APPROVED + RIGHTS_VERIFIED + PLATFORM_ALLOWED or nothing."""
         opp = self.session.get(Opportunity, package.opportunity_id)
-        checks = {"READY": opp.state == OpportunityState.READY.value}
-
-        from packages.domain.repositories import AuditRepository
+        checks = {
+            "READY": opp.state == OpportunityState.READY.value,
+            "QC_PASSED": False,
+        }
+        try:
+            latest_package = self._require_current_passing_qc(ctx, opp)
+            checks["QC_PASSED"] = latest_package.id == package.id
+        except PublicationBlocked:
+            pass
 
         audit = AuditRepository(self.session).list_for_workspace(ctx.workspace_id, limit=500)
         checks["APPROVED"] = any(

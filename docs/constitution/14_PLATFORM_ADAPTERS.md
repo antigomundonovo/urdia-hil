@@ -62,6 +62,11 @@ RIGHTS_VERIFIED
 PLATFORM_ALLOWED
 ```
 
+Além desses quatro gates, a publicação exige QC aprovado para o estado atual
+do pacote. Alterações em rascunho, claims/evidências, direitos ou plano de
+plataforma invalidam a avaliação anterior e exigem nova execução do QC antes
+de aprovar ou exportar.
+
 ## Idempotency
 Quando disponível, usar chave baseada em profile + content + platform + version para evitar duplicate publish.
 

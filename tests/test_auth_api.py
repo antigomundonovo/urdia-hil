@@ -1,5 +1,7 @@
 """Email/password session lifecycle integration tests."""
 
+from uuid import uuid4
+
 from fastapi.testclient import TestClient
 
 from apps.api.main import app
@@ -8,9 +10,11 @@ from packages.shared.db import get_session
 
 def test_register_verify_login_me_logout_and_revocation(db, monkeypatch):
     from apps.api import auth_routes
+    from apps.api.auth import require_workspace_access
     from packages.shared.settings import Settings
 
     issued_tokens = []
+    email = f"new-user-{uuid4().hex}@example.test"
     monkeypatch.setattr(
         auth_routes,
         "get_settings",
@@ -29,6 +33,7 @@ def test_register_verify_login_me_logout_and_revocation(db, monkeypatch):
     def override_session():
         yield db
 
+    app.dependency_overrides.pop(require_workspace_access, None)
     app.dependency_overrides[get_session] = override_session
     try:
         client = TestClient(app)
@@ -36,7 +41,7 @@ def test_register_verify_login_me_logout_and_revocation(db, monkeypatch):
             "/api/v1/auth/register",
             headers={"Origin": "http://localhost:5173"},
             json={
-                "email": "new-user@example.test",
+                "email": email,
                 "password": "a-strong-test-password",
                 "name": "New User",
             },
@@ -49,7 +54,7 @@ def test_register_verify_login_me_logout_and_revocation(db, monkeypatch):
             "/api/v1/auth/register",
             headers={"Origin": "http://localhost:5173"},
             json={
-                "email": "NEW-USER@example.test",
+                "email": email.upper(),
                 "password": "a-different-test-password",
             },
         )
@@ -61,7 +66,7 @@ def test_register_verify_login_me_logout_and_revocation(db, monkeypatch):
         unverified_login = client.post(
             "/api/v1/auth/login",
             headers={"Origin": "http://localhost:5173"},
-            json={"email": "new-user@example.test", "password": "a-strong-test-password"},
+            json={"email": email, "password": "a-strong-test-password"},
         )
         assert unverified_login.status_code == 401
 
@@ -81,7 +86,7 @@ def test_register_verify_login_me_logout_and_revocation(db, monkeypatch):
         logged_in = client.post(
             "/api/v1/auth/login",
             headers={"Origin": "http://localhost:5173"},
-            json={"email": "NEW-USER@example.test", "password": "a-strong-test-password"},
+            json={"email": email.upper(), "password": "a-strong-test-password"},
         )
         assert logged_in.status_code == 200
         assert "urdia_session" in logged_in.cookies
@@ -98,7 +103,7 @@ def test_register_verify_login_me_logout_and_revocation(db, monkeypatch):
         reset_requested = client.post(
             "/api/v1/auth/password-reset/request",
             headers={"Origin": "http://localhost:5173"},
-            json={"email": "new-user@example.test"},
+            json={"email": email},
         )
         assert reset_requested.status_code == 202
         unknown_reset_requested = client.post(
@@ -121,14 +126,14 @@ def test_register_verify_login_me_logout_and_revocation(db, monkeypatch):
         old_password_login = client.post(
             "/api/v1/auth/login",
             headers={"Origin": "http://localhost:5173"},
-            json={"email": "new-user@example.test", "password": "a-strong-test-password"},
+            json={"email": email, "password": "a-strong-test-password"},
         )
         assert old_password_login.status_code == 401
 
         login_again = client.post(
             "/api/v1/auth/login",
             headers={"Origin": "http://localhost:5173"},
-            json={"email": "NEW-USER@example.test", "password": "another-strong-password"},
+            json={"email": email.upper(), "password": "another-strong-password"},
         )
         assert login_again.status_code == 200
         assert client.get("/api/v1/auth/me").status_code == 200

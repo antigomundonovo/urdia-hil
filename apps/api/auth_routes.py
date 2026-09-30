@@ -519,4 +519,5 @@ def logout(
         samesite="lax",
     )
     response.headers["Cache-Control"] = "no-store"
+    response.status_code = 204
     return response

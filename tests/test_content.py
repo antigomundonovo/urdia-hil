@@ -8,6 +8,7 @@ import pytest
 
 from packages.domain.assets import Asset
 from packages.domain.editorial import (
+    Draft,
     PlatformPlan,
 )
 from packages.domain.enums import (
@@ -104,6 +105,17 @@ def test_qc_blocks_without_claim_evidence(db, world):
     qc = content.run_qc(ctx, package)
     assert qc["status"] == "FAIL"
     assert any("without supporting evidence" in issue for issue in qc["blocking_issues"])
+    with pytest.raises(PublicationBlocked, match="requires completed QC|current passing QC"):
+        content.approve(ctx, opp)
+
+
+def test_approval_requires_a_passing_qc(db, world):
+    ws, profile, content = world
+    ctx = _ctx(ws, profile)
+    opp, _package = _package_with_verified_asset(db, world, ctx)
+
+    with pytest.raises(PublicationBlocked, match="requires completed QC"):
+        content.approve(ctx, opp)
 
 
 def test_qc_full_pass_then_approve_makes_ready(db, world):
@@ -129,6 +141,46 @@ def test_publication_bypass_refused_when_not_ready(db, world):
     # opportunity is at QUALITY_CONTROL — NOT READY yet
     with pytest.raises(PublicationBlocked, match="gate refused"):
         content.export_package(ctx, package, platform="instagram")
+
+
+def test_publication_gate_rejects_failed_latest_qc(db, world):
+    ws, profile, content = world
+    ctx = _ctx(ws, profile)
+    opp, package = _package_with_verified_asset(db, world, ctx)
+
+    content.run_qc(ctx, package)
+    content.approve(ctx, opp)
+    draft = db.query(Draft).filter_by(content_package_id=package.id).first()
+    draft.claim_ids_used = []
+    failed_qc = content.run_qc(ctx, package)
+    assert failed_qc["status"] == "FAIL"
+
+    with pytest.raises(PublicationBlocked, match="QC_PASSED"):
+        content.export_package(ctx, package, platform="instagram")
+
+
+def test_publication_gate_rejects_stale_qc_after_new_draft(db, world):
+    ws, profile, content = world
+    ctx = _ctx(ws, profile)
+    opp, package = _package_with_verified_asset(db, world, ctx)
+
+    content.run_qc(ctx, package)
+    content.approve(ctx, opp)
+    draft = db.query(Draft).filter_by(content_package_id=package.id).first()
+    draft.caption = "Changed after QC"
+
+    with pytest.raises(PublicationBlocked, match="QC_PASSED"):
+        content.export_package(ctx, package, platform="instagram")
+
+
+def test_draft_cannot_be_edited_after_qc_starts(db, world):
+    ws, profile, content = world
+    ctx = _ctx(ws, profile)
+    opp, package = _package_with_verified_asset(db, world, ctx)
+    content.run_qc(ctx, package)
+
+    with pytest.raises(PublicationBlocked, match="cannot be edited after QC"):
+        content.generate_draft(ctx, package, title="Edited", caption="Too late")
 
 
 def test_export_after_approval_creates_manifest(db, world):
