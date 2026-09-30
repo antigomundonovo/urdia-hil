@@ -90,6 +90,20 @@ export const api = {
   get: <T,>(path: string) => request<T>(path),
   post: <T,>(path: string, body?: unknown) =>
     request<T>(path, { method: "POST", body: body ? JSON.stringify(body) : undefined }),
+  download: async (path: string, filename: string) => {
+    const response = await fetch(`${API_URL}${path}`, { credentials: "include" });
+    if (!response.ok) {
+      throw new Error(`${response.status}: ${await response.text()}`);
+    }
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.append(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  },
 };
 
 export const qs = (params: Record<string, string | undefined>) => {

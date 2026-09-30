@@ -59,6 +59,7 @@ POST /api/v1/content/{id}/run-qc
 POST /api/v1/content/{id}/approve
 POST /api/v1/content/{id}/reject
 POST /api/v1/content/{id}/export
+GET  /api/v1/content/{id}/export/download
 ```
 
 ### Publication

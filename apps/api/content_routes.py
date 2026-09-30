@@ -10,10 +10,14 @@ GET  /api/v1/content/{id}           (package view)
 All workspace-scoped; server-side authorization revalidated (Doc 08).
 """
 
+import json
+import tempfile
+import zipfile
 from pathlib import Path
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -71,8 +75,6 @@ def create_content(
     workspace_id: UUID = Query(...),
     session: Session = Depends(get_session),
 ):
-    from packages.research.opportunity import OpportunityService
-
     opps = OpportunityService(session)
     opp = opps.get_scoped(opportunity_id, workspace_id)
     if opp is None:
@@ -174,4 +176,79 @@ def export(
         )
     except PublicationBlocked as err:
         raise HTTPException(status_code=409, detail=str(err)) from err
-    return {"export_path": str(export_dir), "platform": body.platform}
+    return {"export_path": export_dir.name, "platform": body.platform}
+
+
+@router.get("/content/{package_id}/export/download")
+def download_export(
+    package_id: UUID,
+    background_tasks: BackgroundTasks,
+    workspace_id: UUID = Query(...),
+    session: Session = Depends(get_session),
+):
+    package = _package_scoped(session, package_id, workspace_id)
+    opp = _opportunity_of(session, package)
+    root = Path(get_settings().export_root).resolve()
+    export_dirs = sorted(root.glob(f"post-*-{str(package.id)[:8]}"))
+    export_dir = export_dirs[-1].resolve() if export_dirs else None
+    if (
+        export_dir is None
+        or not export_dir.is_relative_to(root)
+        or not export_dir.is_dir()
+    ):
+        raise HTTPException(status_code=404, detail="export package not found")
+    manifest_path = export_dir / "manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if manifest["package_id"] != str(package.id):
+            raise ValueError("manifest does not match content package")
+        platform = manifest["platform"]
+        if not isinstance(platform, str) or not platform:
+            raise ValueError("invalid export platform")
+        ContentService(session).publisher_gate(
+            OpportunityService(session).get_session_ctx(opp), package, platform
+        )
+    except (OSError, json.JSONDecodeError, KeyError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail="export package is invalid") from exc
+    except PublicationBlocked as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    files: list[tuple[Path, str]] = []
+    for candidate in export_dir.rglob("*"):
+        if candidate.is_symlink():
+            continue
+        if not candidate.is_file():
+            continue
+        resolved = candidate.resolve()
+        if not resolved.is_relative_to(export_dir):
+            raise HTTPException(status_code=409, detail="export contains an invalid path")
+        files.append((resolved, resolved.relative_to(export_dir).as_posix()))
+    if not files:
+        raise HTTPException(status_code=404, detail="export package is empty")
+
+    temp_root = Path(get_settings().temp_root).resolve()
+    temp_root.mkdir(parents=True, exist_ok=True)
+    archive_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            prefix="urdia-export-",
+            suffix=".zip",
+            dir=temp_root,
+            delete=False,
+        ) as archive:
+            archive_path = Path(archive.name)
+        with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for file_path, arcname in files:
+                archive.write(file_path, arcname)
+    except OSError:
+        if archive_path is not None:
+            archive_path.unlink(missing_ok=True)
+        raise
+
+    background_tasks.add_task(archive_path.unlink, missing_ok=True)
+    return FileResponse(
+        archive_path,
+        media_type="application/zip",
+        filename=f"urdia-export-{opp.id}.zip",
+        background=background_tasks,
+    )

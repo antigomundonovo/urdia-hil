@@ -1,6 +1,8 @@
 """Content API (Doc 02): the V1 flow through HTTP, fail-closed at every step."""
 
 import uuid
+import zipfile
+from io import BytesIO
 
 import pytest
 from fastapi.testclient import TestClient
@@ -78,7 +80,17 @@ def _seed_full(db, world):
     return opp.id, claim.id
 
 
-def test_full_content_flow_through_api(client, db, world):
+def test_full_content_flow_through_api(client, db, world, monkeypatch, tmp_path):
+    from apps.api import content_routes
+    from packages.shared.settings import Settings
+
+    export_root = tmp_path / "exports"
+    temp_root = tmp_path / "temp"
+    monkeypatch.setattr(
+        content_routes,
+        "get_settings",
+        lambda: Settings(export_root=str(export_root), temp_root=str(temp_root)),
+    )
     opp_id, claim_id = _seed_full(db, world)
     detail = client.get(
         f"/api/v1/opportunities/{opp_id}?workspace_id={world[0].id}"
@@ -117,6 +129,56 @@ def test_full_content_flow_through_api(client, db, world):
     )
     assert exported.status_code == 200
     assert "post-" in exported.json()["export_path"]
+    downloaded = client.get(
+        f"/api/v1/content/{package_id}/export/download?workspace_id={world[0].id}"
+    )
+    assert downloaded.status_code == 200
+    assert downloaded.headers["content-type"] == "application/zip"
+    with zipfile.ZipFile(BytesIO(downloaded.content)) as archive:
+        assert "manifest.json" in archive.namelist()
+        assert "captions/caption.txt" in archive.namelist()
+        assert "1911" in archive.read("captions/caption.txt").decode("utf-8")
+    assert list(temp_root.iterdir()) == []
+
+
+def test_download_export_refuses_revoked_approval(client, db, world, monkeypatch, tmp_path):
+    from apps.api import content_routes
+    from packages.domain.editorial import Opportunity
+    from packages.shared.settings import Settings
+
+    monkeypatch.setattr(
+        content_routes,
+        "get_settings",
+        lambda: Settings(
+            export_root=str(tmp_path / "exports"),
+            temp_root=str(tmp_path / "temp"),
+        ),
+    )
+    opp_id, claim_id = _seed_full(db, world)
+    created = client.post(
+        f"/api/v1/opportunities/{opp_id}/create-content?workspace_id={world[0].id}",
+        json={"format": "PHOTO_POST", "seo_entities": ["bondinho"]},
+    )
+    package_id = created.json()["package_id"]
+    client.post(
+        f"/api/v1/content/{package_id}/generate-draft?workspace_id={world[0].id}",
+        json={"title": "1911", "caption": "O bondinho", "claim_ids_used": [str(claim_id)]},
+    )
+    client.post(f"/api/v1/content/{package_id}/run-qc?workspace_id={world[0].id}")
+    client.post(f"/api/v1/content/{package_id}/approve?workspace_id={world[0].id}")
+    exported = client.post(
+        f"/api/v1/content/{package_id}/export?workspace_id={world[0].id}",
+        json={"platform": "instagram"},
+    )
+    assert exported.status_code == 200
+
+    opportunity = db.get(Opportunity, opp_id)
+    opportunity.state = "REJECTED"
+    db.flush()
+    downloaded = client.get(
+        f"/api/v1/content/{package_id}/export/download?workspace_id={world[0].id}"
+    )
+    assert downloaded.status_code == 409
 
 
 def test_export_blocked_before_approval_returns_409(client, db, world):

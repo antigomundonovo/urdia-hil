@@ -13,7 +13,6 @@ export default function OpportunityDetail() {
   const [qc, setQc] = useState<QcResult | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [exportPath, setExportPath] = useState<string | null>(null);
   const [format, setFormat] = useState("PHOTO_POST");
   const [packageId, setPackageId] = useState<string | null>(null);
   const [usedClaimIds, setUsedClaimIds] = useState<string[]>([]);
@@ -60,14 +59,18 @@ export default function OpportunityDetail() {
     onError: (e) => setActionError((e as Error).message),
   });
   const exportPackage = useMutation({
-    mutationFn: () =>
-      api.post<{ export_path: string; platform: string }>(
+    mutationFn: async () => {
+      await api.post<{ export_path: string; platform: string }>(
         `/api/v1/content/${packageId}/export?workspace_id=${workspaceId}`,
         { platform }
-      ),
-    onSuccess: (result) => {
-      setExportPath(result.export_path);
-      setMessage("Pacote exportado. A publicação na plataforma deve ser feita manualmente.");
+      );
+      await api.download(
+        `/api/v1/content/${packageId}/export/download?workspace_id=${workspaceId}`,
+        `urdia-export-${packageId}.zip`
+      );
+    },
+    onSuccess: () => {
+      setMessage("Pacote exportado e baixado. A publicação na plataforma deve ser feita manualmente.");
       setActionError(null);
     },
     onError: (e) => setActionError((e as Error).message),
@@ -134,7 +137,6 @@ export default function OpportunityDetail() {
                   setPackageId(r.package_id);
                   setUsedClaimIds([]);
                   setQc(null);
-                  setExportPath(null);
                   setActionError(null);
                   setMessage(`Pacote criado (${format}). Escreva o rascunho abaixo.`);
                   queryClient.invalidateQueries({ queryKey: ["opportunity", id] });
@@ -275,11 +277,6 @@ export default function OpportunityDetail() {
           A publicação direta ainda não está conectada; a exportação gera o pacote para publicação manual.
         </p>
         {message && <p className="mt-3 text-sm text-green-700">{message}</p>}
-        {exportPath && (
-          <p role="status" className="mt-2 break-all text-xs text-stone-600">
-            Pasta exportada: {exportPath}
-          </p>
-        )}
         {actionError && (
           <p role="alert" className="mt-3 text-sm text-red-700">
             {actionError}
