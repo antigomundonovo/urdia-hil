@@ -31,7 +31,29 @@ export interface Opportunity {
   priority: string | null;
   state: string;
   created_at: string;
+  content_package_id?: string | null;
   claims?: { id: string; text: string; status: string }[];
+}
+
+export interface ContentPackage {
+  id: string;
+  workspace_id: string;
+  opportunity_id: string;
+  canonical_content_id: string;
+  format: string;
+  opportunity_state: string;
+  drafts: {
+    id: string;
+    title: string | null;
+    caption: string | null;
+    status: string;
+    claim_ids_used: string[];
+  }[];
+  latest_qc: {
+    status: string;
+    gates: Record<string, string>;
+    is_current: boolean;
+  } | null;
 }
 
 export interface QcResult {

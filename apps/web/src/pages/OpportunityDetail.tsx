@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
-import { useState } from "react";
-import { api, Opportunity, QcResult } from "../api";
+import { useEffect, useRef, useState } from "react";
+import { api, ContentPackage, Opportunity, QcResult } from "../api";
 import { useProfile } from "../profile";
 import { StateBadge } from "./Opportunities";
 
@@ -18,6 +18,16 @@ export default function OpportunityDetail() {
   const [usedClaimIds, setUsedClaimIds] = useState<string[]>([]);
   const [draftTitle, setDraftTitle] = useState("");
   const [draftCaption, setDraftCaption] = useState("");
+  const hydratedPackageId = useRef<string | null>(null);
+
+  useEffect(() => {
+    setPackageId(null);
+    setUsedClaimIds([]);
+    setDraftTitle("");
+    setDraftCaption("");
+    setQc(null);
+    hydratedPackageId.current = null;
+  }, [id, workspaceId]);
 
   const { data: opp } = useQuery({
     queryKey: ["opportunity", id, workspaceId],
@@ -26,12 +36,52 @@ export default function OpportunityDetail() {
       api.get<Opportunity>(`/api/v1/opportunities/${id}?workspace_id=${workspaceId}`),
   });
 
+  useEffect(() => {
+    if (opp?.content_package_id && opp.content_package_id !== packageId) {
+      setPackageId(opp.content_package_id);
+    }
+  }, [opp?.content_package_id, packageId]);
+
+  const {
+    data: contentPackage,
+    error: contentPackageError,
+  } = useQuery({
+    queryKey: ["content-package", packageId, workspaceId],
+    enabled: !!packageId && !!workspaceId,
+    queryFn: () =>
+      api.get<ContentPackage>(
+        `/api/v1/content/${packageId}?workspace_id=${workspaceId}`
+      ),
+  });
+
+  useEffect(() => {
+    if (!contentPackage || hydratedPackageId.current === contentPackage.id) return;
+    hydratedPackageId.current = contentPackage.id;
+    const latestDraft = contentPackage.drafts.at(-1);
+    setDraftTitle(latestDraft?.title ?? "");
+    setDraftCaption(latestDraft?.caption ?? "");
+    setUsedClaimIds(latestDraft?.claim_ids_used ?? []);
+    setQc(
+      contentPackage.latest_qc?.is_current
+        ? {
+            status: contentPackage.latest_qc.status,
+            gates: contentPackage.latest_qc.gates,
+            blocking_issues: [],
+            warnings: [],
+          }
+        : null
+    );
+  }, [contentPackage]);
+
   const runQc = useMutation({
     mutationFn: () =>
       api.post<QcResult>(`/api/v1/opportunities/${id}/run-qc?workspace_id=${workspaceId}`),
     onSuccess: async (result) => {
       setQc(result);
       setActionError(null);
+      await queryClient.invalidateQueries({
+        queryKey: ["content-package", packageId, workspaceId],
+      });
       await queryClient.invalidateQueries({ queryKey: ["opportunity", id] });
     },
     onError: (e) => setActionError((e as Error).message),
@@ -78,6 +128,13 @@ export default function OpportunityDetail() {
 
   if (!opp) return <p className="text-sm text-stone-400">carregando…</p>;
 
+  const savedDraft = contentPackage?.drafts.at(-1);
+  const draftIsDirty =
+    !!packageId &&
+    (draftTitle !== (savedDraft?.title ?? "") ||
+      draftCaption !== (savedDraft?.caption ?? "") ||
+      JSON.stringify(usedClaimIds) !==
+        JSON.stringify(savedDraft?.claim_ids_used ?? []));
   const row = "flex items-start justify-between gap-4 border-b border-stone-100 py-3";
 
   return (
@@ -135,6 +192,7 @@ export default function OpportunityDetail() {
                 )
                 .then((r) => {
                   setPackageId(r.package_id);
+                  hydratedPackageId.current = null;
                   setUsedClaimIds([]);
                   setQc(null);
                   setActionError(null);
@@ -143,7 +201,7 @@ export default function OpportunityDetail() {
                 })
                 .catch((e) => setActionError((e as Error).message))
             }
-            disabled={!!packageId}
+            disabled={!!packageId || !!opp.content_package_id}
             className="rounded border border-stone-300 px-4 py-2 text-sm font-medium hover:bg-stone-50"
           >
             Criar conteúdo
@@ -151,15 +209,25 @@ export default function OpportunityDetail() {
         </div>
         {packageId && (
           <div className="mt-4 space-y-2">
+            {!contentPackage && !contentPackageError && (
+              <p className="text-sm text-stone-500">Carregando pacote e rascunho…</p>
+            )}
+            {contentPackageError && (
+              <p role="alert" className="text-sm text-red-700">
+                Não foi possível recuperar o pacote: {contentPackageError.message}
+              </p>
+            )}
             <input
               value={draftTitle}
               onChange={(e) => setDraftTitle(e.target.value)}
+              disabled={!contentPackage || !!contentPackageError}
               placeholder="título do post"
               className="w-full rounded border border-stone-300 px-3 py-2 text-sm"
             />
             <textarea
               value={draftCaption}
               onChange={(e) => setDraftCaption(e.target.value)}
+              disabled={!contentPackage || !!contentPackageError}
               placeholder="legenda — a prova (claim) usada fica rastreável no sistema"
               rows={3}
               className="w-full rounded border border-stone-300 px-3 py-2 text-sm"
@@ -179,11 +247,14 @@ export default function OpportunityDetail() {
                     setQc(null);
                     setActionError(null);
                     setMessage("Rascunho salvo — rode o QC e decida.");
-                    queryClient.invalidateQueries({ queryKey: ["opportunity", id] });
+                    void queryClient.invalidateQueries({
+                      queryKey: ["content-package", packageId, workspaceId],
+                    });
+                    void queryClient.invalidateQueries({ queryKey: ["opportunity", id] });
                   })
                   .catch((e) => setActionError((e as Error).message))
               }
-              disabled={!draftTitle || !draftCaption}
+              disabled={!contentPackage || !!contentPackageError || !draftTitle || !draftCaption}
               className="rounded bg-stone-900 px-4 py-2 text-sm font-medium text-white hover:bg-stone-700 disabled:opacity-40"
             >
               Salvar rascunho
@@ -224,6 +295,11 @@ export default function OpportunityDetail() {
             </p>
           </div>
         )}
+        {contentPackage?.latest_qc && !contentPackage.latest_qc.is_current && (
+          <p className="mt-3 text-sm text-amber-800">
+            O QC salvo está desatualizado em relação ao conteúdo atual. Rode o QC novamente antes de aprovar.
+          </p>
+        )}
       </section>
 
       <section className="rounded-lg border border-stone-200 bg-white p-5">
@@ -236,6 +312,7 @@ export default function OpportunityDetail() {
             disabled={
               approve.isPending ||
               opp.state !== "QUALITY_CONTROL" ||
+              draftIsDirty ||
               !qc ||
               !["PASS", "WARNING"].includes(qc.status)
             }
@@ -267,7 +344,7 @@ export default function OpportunityDetail() {
           />
           <button
             onClick={() => runQc.mutate()}
-            disabled={!packageId || runQc.isPending}
+            disabled={!packageId || !contentPackage || draftIsDirty || runQc.isPending}
             className="rounded border border-stone-300 px-4 py-2 text-sm font-medium hover:bg-stone-50"
           >
             {runQc.isPending ? "Verificando…" : "Rodar QC"}
@@ -277,6 +354,11 @@ export default function OpportunityDetail() {
           A publicação direta ainda não está conectada; a exportação gera o pacote para publicação manual.
         </p>
         {message && <p className="mt-3 text-sm text-green-700">{message}</p>}
+        {draftIsDirty && (
+          <p className="mt-3 text-sm text-amber-800">
+            Salve as alterações do rascunho antes de executar QC ou aprovar.
+          </p>
+        )}
         {actionError && (
           <p role="alert" className="mt-3 text-sm text-red-700">
             {actionError}

@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from packages.domain.editorial import Opportunity, OpportunityClaim
+from packages.domain.editorial import ContentPackage, Opportunity, OpportunityClaim
 from packages.domain.knowledge import Claim
 from packages.domain.models import Profile
 from packages.research.opportunity import OpportunityService
@@ -137,6 +137,16 @@ def get_opportunity(
     if opp is None:
         raise HTTPException(status_code=404, detail="opportunity not found")
     payload = _payload(opp)
+    latest_package = session.scalars(
+        select(ContentPackage)
+        .where(
+            ContentPackage.opportunity_id == opp.id,
+            ContentPackage.workspace_id == workspace_id,
+        )
+        .order_by(ContentPackage.created_at.desc(), ContentPackage.id.desc())
+        .limit(1)
+    ).first()
+    payload["content_package_id"] = str(latest_package.id) if latest_package else None
     claims = session.scalars(
         select(Claim)
         .join(OpportunityClaim, OpportunityClaim.ref_id == Claim.id)

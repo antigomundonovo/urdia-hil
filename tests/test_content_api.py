@@ -120,6 +120,10 @@ def test_full_content_flow_through_api(client, db, world, monkeypatch, tmp_path)
     )
     assert created.status_code == 200
     package_id = created.json()["package_id"]
+    detail = client.get(
+        f"/api/v1/opportunities/{opp_id}?workspace_id={world[0].id}"
+    )
+    assert detail.json()["content_package_id"] == package_id
 
     draft = client.post(
         f"/api/v1/content/{package_id}/generate-draft?workspace_id={world[0].id}",
@@ -133,6 +137,25 @@ def test_full_content_flow_through_api(client, db, world, monkeypatch, tmp_path)
     assert body["gates"]["evidence"] == "PASS"
     assert body["gates"]["rights"] == "PASS"
     assert body["gates"]["human_review"] == "REQUIRED"
+
+    restored = client.get(
+        f"/api/v1/content/{package_id}?workspace_id={world[0].id}"
+    )
+    assert restored.status_code == 200
+    restored_body = restored.json()
+    assert restored_body["drafts"][-1]["title"] == "1911"
+    assert restored_body["drafts"][-1]["caption"] == "O bondinho..."
+    assert restored_body["drafts"][-1]["claim_ids_used"] == [str(claim_id)]
+    assert restored_body["latest_qc"]["status"] == body["status"]
+    assert restored_body["latest_qc"]["is_current"] is True
+
+    foreign_workspace = Workspace(name=f"other-{uuid.uuid4().hex[:8]}")
+    db.add(foreign_workspace)
+    db.flush()
+    foreign = client.get(
+        f"/api/v1/content/{package_id}?workspace_id={foreign_workspace.id}"
+    )
+    assert foreign.status_code == 404
 
     approved = client.post(f"/api/v1/content/{package_id}/approve?workspace_id={world[0].id}")
     assert approved.status_code == 200

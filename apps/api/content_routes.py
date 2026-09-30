@@ -19,10 +19,18 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from packages.domain.editorial import ContentPackage, Opportunity
+from packages.domain.editorial import (
+    CanonicalContent,
+    ContentPackage,
+    Draft,
+    Opportunity,
+    PlatformVariant,
+)
 from packages.domain.enums import ContentFormat
+from packages.domain.models import AuditEvent
 from packages.research.content import ContentService, PublicationBlocked
 from packages.research.opportunity import OpportunityService
 from packages.shared.db import get_session
@@ -63,7 +71,7 @@ def _package_scoped(session: Session, package_id: UUID, workspace_id: UUID) -> C
 
 def _opportunity_of(session: Session, package: ContentPackage) -> Opportunity:
     opp = session.get(Opportunity, package.opportunity_id)
-    if opp is None:
+    if opp is None or opp.workspace_id != package.workspace_id:
         raise HTTPException(status_code=404, detail="opportunity not found")
     return opp
 
@@ -96,6 +104,116 @@ def create_content(
         cta_policy=body.cta_policy,
     )
     return {"package_id": str(package.id), "format": package.format, "opportunity_state": opp.state}
+
+
+@router.get("/content/{package_id}")
+def get_content_package(
+    package_id: UUID,
+    workspace_id: UUID = Query(...),
+    session: Session = Depends(get_session),
+):
+    package = _package_scoped(session, package_id, workspace_id)
+    opportunity = _opportunity_of(session, package)
+    canonical = session.get(CanonicalContent, package.canonical_content_id)
+    if (
+        canonical is None
+        or canonical.workspace_id != workspace_id
+        or canonical.opportunity_id != package.opportunity_id
+    ):
+        raise HTTPException(status_code=404, detail="content package not found")
+
+    drafts = list(
+        session.scalars(
+            select(Draft)
+            .where(
+                Draft.content_package_id == package.id,
+                Draft.workspace_id == workspace_id,
+            )
+            .order_by(Draft.created_at, Draft.id)
+        )
+    )
+    variants = list(
+        session.scalars(
+            select(PlatformVariant)
+            .where(
+                PlatformVariant.content_package_id == package.id,
+                PlatformVariant.workspace_id == workspace_id,
+            )
+            .order_by(PlatformVariant.created_at, PlatformVariant.id)
+        )
+    )
+
+    ctx = OpportunityService(session).get_session_ctx(opportunity)
+    current_fingerprint = ContentService(session)._qc_input_fingerprint(
+        ctx, package, opportunity
+    )
+    latest_qc = session.scalars(
+        select(AuditEvent)
+        .where(
+            AuditEvent.workspace_id == workspace_id,
+            AuditEvent.action == "QC_RUN",
+            AuditEvent.entity_type == "content_package",
+            AuditEvent.entity_id == package.id,
+        )
+        .order_by(AuditEvent.timestamp.desc(), AuditEvent.id.desc())
+        .limit(1)
+    ).first()
+
+    return {
+        "id": str(package.id),
+        "workspace_id": str(package.workspace_id),
+        "opportunity_id": str(package.opportunity_id),
+        "canonical_content_id": str(package.canonical_content_id),
+        "format": package.format,
+        "payload": package.payload,
+        "created_at": package.created_at.isoformat() if package.created_at else None,
+        "opportunity_state": opportunity.state,
+        "canonical_content": {
+            "factual_core": canonical.factual_core,
+            "claims": canonical.claims,
+            "source_references": canonical.source_references,
+            "editorial_angle": canonical.editorial_angle,
+            "key_message": canonical.key_message,
+            "visual_assets": canonical.visual_assets,
+            "cta_policy": canonical.cta_policy,
+            "seo_entities": canonical.seo_entities,
+        },
+        "drafts": [
+            {
+                "id": str(draft.id),
+                "title": draft.title,
+                "caption": draft.caption,
+                "payload": draft.payload,
+                "status": draft.status,
+                "claim_ids_used": [str(claim_id) for claim_id in (draft.claim_ids_used or [])],
+                "created_at": draft.created_at.isoformat() if draft.created_at else None,
+                "updated_at": draft.updated_at.isoformat() if draft.updated_at else None,
+            }
+            for draft in drafts
+        ],
+        "platform_variants": [
+            {
+                "id": str(variant.id),
+                "platform": variant.platform,
+                "payload": variant.payload,
+                "created_at": variant.created_at.isoformat() if variant.created_at else None,
+            }
+            for variant in variants
+        ],
+        "latest_qc": (
+            {
+                "status": latest_qc.new_state,
+                "gates": (latest_qc.metadata_ or {}).get("gates", {}),
+                "is_current": (latest_qc.metadata_ or {}).get("input_fingerprint")
+                == current_fingerprint,
+                "created_at": (
+                    latest_qc.timestamp.isoformat() if latest_qc.timestamp else None
+                ),
+            }
+            if latest_qc
+            else None
+        ),
+    }
 
 
 @router.post("/content/{package_id}/generate-draft")
