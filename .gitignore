@@ -45,3 +45,4 @@ Thumbs.db
 .idea/
 .vscode/
 .pytest_tmp/
+.pytest_tmp/

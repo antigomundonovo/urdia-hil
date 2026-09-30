@@ -41,3 +41,20 @@ jobs:
         run: python -m apps.worker --once
       - name: Tests (unit + integration + DB parity)
         run: pytest -q
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install
+        run: npm install --no-fund --no-audit
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Build
+        run: npm run build
