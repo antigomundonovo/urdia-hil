@@ -199,8 +199,14 @@ def test_experiment_requires_control_and_variant(db, world):
     ws, profile = world
     ctx = _ctx(ws, profile)
     learning = LearningService(db)
-    with pytest.raises(LearningError, match="2 variants"):
+    with pytest.raises(LearningError, match="control and at least one variant"):
         learning.create_experiment(ctx, hypothesis="h", variants={"control": {}})
+    with pytest.raises(LearningError, match="control and at least one variant"):
+        learning.create_experiment(
+            ctx,
+            hypothesis="h",
+            variants={"variant-a": {}, "variant-b": {}},
+        )
     experiment = learning.create_experiment(
         ctx,
         hypothesis="5 vs 8 slides",

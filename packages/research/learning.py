@@ -84,8 +84,8 @@ class LearningService:
         self._require_profile(ctx)
         if not hypothesis or not hypothesis.strip():
             raise LearningError("experiment requires a hypothesis")
-        if len(variants) < 2:
-            raise LearningError("experiment requires at least 2 variants (control + variant)")
+        if len(variants) < 2 or "control" not in variants:
+            raise LearningError("experiment requires a control and at least one variant")
         experiment = Experiment(
             workspace_id=ctx.workspace_id,
             profile_id=ctx.profile_id,
