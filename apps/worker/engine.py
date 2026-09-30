@@ -92,6 +92,15 @@ class JobEngine:
         self.handlers = handlers
         self.default_max_attempts = default_max_attempts
 
+    @staticmethod
+    def _context_for(job: Job) -> ExecutionContext:
+        return ExecutionContext(
+            workspace_id=job.workspace_id,
+            profile_id=job.profile_id,
+            job_id=job.id,
+            correlation_id=f"job:{job.id}",
+        )
+
     # --- lifecycle --------------------------------------------------------
 
     def claim_next(self) -> Job | None:
@@ -108,7 +117,11 @@ class JobEngine:
         max_attempts = job.max_attempts or self.default_max_attempts
         attempt = (job.attempt or 0) + 1
         if attempt > max_attempts:
-            self._fail(job, f"max attempts exhausted ({max_attempts})")
+            self._fail(
+                job,
+                f"max attempts exhausted ({max_attempts})",
+                ctx=self._context_for(job),
+            )
             return None
         job.status = JOB_RUNNING
         job.attempt = attempt
@@ -119,12 +132,7 @@ class JobEngine:
         return job
 
     def run_job(self, job: Job) -> Job:
-        ctx = ExecutionContext(
-            workspace_id=job.workspace_id,
-            profile_id=job.profile_id,
-            job_id=job.id,
-            correlation_id=f"job:{job.id}",
-        )
+        ctx = self._context_for(job)
 
         def persist(snapshot: dict[str, Any]) -> None:
             job.checkpoint = snapshot
@@ -138,7 +146,11 @@ class JobEngine:
 
         handler = self.handlers.get(str(job.job_type))
         if handler is None:
-            self._fail(job, f"no handler registered for job_type={job.job_type}")
+            self._fail(
+                job,
+                f"no handler registered for job_type={job.job_type}",
+                ctx=ctx,
+            )
             return job
 
         try:
@@ -198,6 +210,16 @@ class JobEngine:
         count = 0
         for job in stuck:
             job.status = JOB_PENDING
+            append_audit(
+                self.session,
+                ctx=self._context_for(job),
+                action="JOB_RECOVERED",
+                entity_type="job",
+                entity_id=job.id,
+                previous_state=JOB_RUNNING,
+                new_state=JOB_PENDING,
+                metadata={"completed_steps": (job.checkpoint or {}).get("completed_steps", [])},
+            )
             count += 1
         if count:
             self.session.flush()
@@ -209,8 +231,18 @@ class JobEngine:
             return None  # fail closed on foreign workspace
         if job.status != JOB_FAILED:
             return None
+        previous_status = job.status
         job.status = JOB_PENDING
         job.error = None
+        append_audit(
+            self.session,
+            ctx=self._context_for(job),
+            action="JOB_RETRY_REQUESTED",
+            entity_type="job",
+            entity_id=job.id,
+            previous_state=previous_status,
+            new_state=JOB_PENDING,
+        )
         self.session.flush()
         return job
 
@@ -220,28 +252,39 @@ class JobEngine:
             return None
         if job.status in (JOB_SUCCEEDED, JOB_CANCELLED):
             return None
+        previous_status = job.status
         job.status = JOB_CANCELLED
         job.finished_at = datetime.now(UTC)
+        append_audit(
+            self.session,
+            ctx=self._context_for(job),
+            action="JOB_CANCELLED",
+            entity_type="job",
+            entity_id=job.id,
+            previous_state=previous_status,
+            new_state=JOB_CANCELLED,
+        )
         self.session.flush()
         return job
 
     # --- helpers ----------------------------------------------------------
 
     def _fail(self, job: Job, error: str, ctx: ExecutionContext | None = None) -> None:
+        previous_status = job.status
         job.status = JOB_FAILED
         job.error = error
         job.finished_at = datetime.now(UTC)
-        if ctx is not None:
-            append_audit(
-                self.session,
-                ctx=ctx,
-                action="JOB_FAILED",
-                entity_type="job",
-                entity_id=job.id,
-                new_state=JOB_FAILED,
-                reason=error,
-                metadata={"job_type": str(job.job_type), "attempt": job.attempt},
-            )
+        append_audit(
+            self.session,
+            ctx=ctx or self._context_for(job),
+            action="JOB_FAILED",
+            entity_type="job",
+            entity_id=job.id,
+            previous_state=previous_status,
+            new_state=JOB_FAILED,
+            reason=error,
+            metadata={"job_type": str(job.job_type), "attempt": job.attempt},
+        )
         self.session.flush()
 
 

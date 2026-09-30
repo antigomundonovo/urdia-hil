@@ -12,6 +12,9 @@ class _Session:
     def flush(self):
         pass
 
+    def get(self, model, job_id):
+        return self.job
+
 
 def _job():
     return SimpleNamespace(
@@ -56,3 +59,48 @@ def test_retryable_failure_is_requeued(monkeypatch):
 
     assert job.status == JOB_PENDING
     assert job.error == "temporary network failure"
+
+
+def test_recovery_audits_running_to_pending_transition(monkeypatch):
+    audit_events = []
+    monkeypatch.setattr(
+        worker_engine,
+        "append_audit",
+        lambda _session, **event: audit_events.append(event),
+    )
+    job = _job()
+    job.status = worker_engine.JOB_RUNNING
+    session = _Session()
+    session.scalars = lambda statement: [job]
+
+    recovered = JobEngine(session, {}).recover_running()
+
+    assert recovered == 1
+    assert job.status == JOB_PENDING
+    assert audit_events[0]["action"] == "JOB_RECOVERED"
+    assert audit_events[0]["previous_state"] == worker_engine.JOB_RUNNING
+    assert audit_events[0]["new_state"] == JOB_PENDING
+
+
+def test_retry_and_cancel_audit_status_changes(monkeypatch):
+    audit_events = []
+    monkeypatch.setattr(
+        worker_engine,
+        "append_audit",
+        lambda _session, **event: audit_events.append(event),
+    )
+    job = _job()
+    job.status = JOB_FAILED
+    session = _Session()
+    session.job = job
+    engine = JobEngine(session, {})
+
+    assert engine.retry_failed(job.id, job.workspace_id) is job
+    assert audit_events[-1]["action"] == "JOB_RETRY_REQUESTED"
+    assert audit_events[-1]["previous_state"] == JOB_FAILED
+    assert audit_events[-1]["new_state"] == JOB_PENDING
+
+    assert engine.cancel(job.id, job.workspace_id) is job
+    assert audit_events[-1]["action"] == "JOB_CANCELLED"
+    assert audit_events[-1]["previous_state"] == JOB_PENDING
+    assert audit_events[-1]["new_state"] == worker_engine.JOB_CANCELLED
