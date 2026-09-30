@@ -1,5 +1,6 @@
 """Content API (Doc 02): the V1 flow through HTTP, fail-closed at every step."""
 
+import hashlib
 import uuid
 import zipfile
 from io import BytesIO
@@ -9,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from apps.api.main import app
 from packages.domain.assets import Asset
+from packages.domain.editorial import OpportunityAsset
 from packages.domain.enums import RightsClassification
 from packages.domain.models import Profile, Source, Workspace
 from packages.research.opportunity import OpportunityService
@@ -86,12 +88,25 @@ def test_full_content_flow_through_api(client, db, world, monkeypatch, tmp_path)
 
     export_root = tmp_path / "exports"
     temp_root = tmp_path / "temp"
+    asset_root = tmp_path / "assets"
     monkeypatch.setattr(
         content_routes,
         "get_settings",
-        lambda: Settings(export_root=str(export_root), temp_root=str(temp_root)),
+        lambda: Settings(
+            export_root=str(export_root),
+            temp_root=str(temp_root),
+            asset_root=str(asset_root),
+        ),
     )
     opp_id, claim_id = _seed_full(db, world)
+    asset_link = db.query(OpportunityAsset).filter_by(opportunity_id=opp_id).one()
+    asset = db.get(Asset, asset_link.ref_id)
+    image_bytes = b"\x89PNG\r\n\x1a\nurdia-test-image"
+    asset.storage_path = f"originals/{asset.id}.png"
+    asset.file_hash = hashlib.sha256(image_bytes).hexdigest()
+    image_path = asset_root / asset.storage_path
+    image_path.parent.mkdir(parents=True)
+    image_path.write_bytes(image_bytes)
     detail = client.get(
         f"/api/v1/opportunities/{opp_id}?workspace_id={world[0].id}"
     )
@@ -138,6 +153,10 @@ def test_full_content_flow_through_api(client, db, world, monkeypatch, tmp_path)
         assert "manifest.json" in archive.namelist()
         assert "captions/caption.txt" in archive.namelist()
         assert "1911" in archive.read("captions/caption.txt").decode("utf-8")
+        assert archive.read(f"image/{asset.id}.png") == image_bytes
+        assert f"rights/{asset.id}.json" in archive.namelist()
+        assert "sources/claims-and-evidence.json" in archive.namelist()
+        assert len([name for name in archive.namelist() if name.startswith("sources/")]) == 2
     assert list(temp_root.iterdir()) == []
 
 
@@ -207,3 +226,61 @@ def test_unknown_format_rejected(client, db, world):
         json={"format": "LONG_VIDEO"},
     )
     assert resp.status_code == 422
+
+
+def test_draft_rejects_claim_from_another_workspace(client, db, world):
+    opp_id, _ = _seed_full(db, world)
+    created = client.post(
+        f"/api/v1/opportunities/{opp_id}/create-content?workspace_id={world[0].id}",
+        json={"format": "PHOTO_POST"},
+    )
+    package_id = created.json()["package_id"]
+
+    other_workspace = Workspace(name=f"foreign-{uuid.uuid4().hex[:8]}")
+    db.add(other_workspace)
+    db.flush()
+    other_profile = Profile(
+        workspace_id=other_workspace.id,
+        key="foreign",
+        name="Foreign",
+    )
+    db.add(other_profile)
+    db.flush()
+    foreign_claim = KnowledgeService(db).add_claim(
+        ExecutionContext(
+            workspace_id=other_workspace.id,
+            profile_id=other_profile.id,
+        ),
+        subject="Foreign",
+        predicate="is",
+        object="separate",
+    )
+
+    second_profile = Profile(
+        workspace_id=world[0].id,
+        key="another-profile",
+        name="Another profile",
+    )
+    db.add(second_profile)
+    db.flush()
+    foreign_profile_claim = KnowledgeService(db).add_claim(
+        ExecutionContext(
+            workspace_id=world[0].id,
+            profile_id=second_profile.id,
+        ),
+        subject="Other profile",
+        predicate="is",
+        object="separate",
+    )
+
+    for claim in (foreign_claim, foreign_profile_claim):
+        response = client.post(
+            f"/api/v1/content/{package_id}/generate-draft?workspace_id={world[0].id}",
+            json={
+                "title": "Invalid citation",
+                "caption": "Claim from another scope",
+                "claim_ids_used": [str(claim.id)],
+            },
+        )
+        assert response.status_code == 422
+        assert "belong to the opportunity" in response.text

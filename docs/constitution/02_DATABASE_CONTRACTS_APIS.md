@@ -62,6 +62,9 @@ POST /api/v1/content/{id}/export
 GET  /api/v1/content/{id}/export/download
 ```
 
+O download entrega um ZIP temporário com a pasta de exportação; credenciais
+de workspace/profile continuam obrigatórias e o backend revalida os gates.
+
 ### Publication
 ```http
 GET  /api/v1/publications

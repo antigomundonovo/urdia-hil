@@ -42,7 +42,7 @@ class CreateContentBody(BaseModel):
 class DraftBody(BaseModel):
     title: str
     caption: str
-    claim_ids_used: list[str] = Field(default_factory=list)
+    claim_ids_used: list[UUID] = Field(default_factory=list)
     payload: dict = Field(default_factory=dict)
 
 
@@ -108,14 +108,17 @@ def generate_draft(
     package = _package_scoped(session, package_id, workspace_id)
     opp = _opportunity_of(session, package)
     ctx = OpportunityService(session).get_session_ctx(opp)
-    draft = ContentService(session).generate_draft(
-        ctx,
-        package,
-        title=body.title,
-        caption=body.caption,
-        claim_ids_used=body.claim_ids_used,
-        payload=body.payload,
-    )
+    try:
+        draft = ContentService(session).generate_draft(
+            ctx,
+            package,
+            title=body.title,
+            caption=body.caption,
+            claim_ids_used=body.claim_ids_used,
+            payload=body.payload,
+        )
+    except PublicationBlocked as err:
+        raise HTTPException(status_code=422, detail=str(err)) from err
     return {"draft_id": str(draft.id), "status": draft.status}
 
 
@@ -128,7 +131,10 @@ def run_qc(
     package = _package_scoped(session, package_id, workspace_id)
     opp = _opportunity_of(session, package)
     ctx = OpportunityService(session).get_session_ctx(opp)
-    return ContentService(session).run_qc(ctx, package)
+    return ContentService(
+        session,
+        asset_root=Path(get_settings().asset_root),
+    ).run_qc(ctx, package)
 
 
 @router.post("/content/{package_id}/approve")
@@ -139,9 +145,12 @@ def approve(
 ):
     package = _package_scoped(session, package_id, workspace_id)
     opp = _opportunity_of(session, package)
-    ContentService(session).approve(
-        OpportunityService(session).get_session_ctx(opp), opp
-    )
+    try:
+        ContentService(session).approve(
+            OpportunityService(session).get_session_ctx(opp), opp
+        )
+    except PublicationBlocked as err:
+        raise HTTPException(status_code=409, detail=str(err)) from err
     return {"opportunity_id": str(opp.id), "state": opp.state}
 
 
@@ -169,7 +178,12 @@ def export(
 ):
     package = _package_scoped(session, package_id, workspace_id)
     opp = _opportunity_of(session, package)
-    content = ContentService(session, export_root=Path(get_settings().export_root))
+    settings = get_settings()
+    content = ContentService(
+        session,
+        export_root=Path(settings.export_root),
+        asset_root=Path(settings.asset_root),
+    )
     try:
         export_dir = content.export_package(
             OpportunityService(session).get_session_ctx(opp), package, platform=body.platform
@@ -205,7 +219,7 @@ def download_export(
         platform = manifest["platform"]
         if not isinstance(platform, str) or not platform:
             raise ValueError("invalid export platform")
-        ContentService(session).publisher_gate(
+        ContentService(session, asset_root=Path(get_settings().asset_root)).publisher_gate(
             OpportunityService(session).get_session_ctx(opp), package, platform
         )
     except (OSError, json.JSONDecodeError, KeyError, ValueError) as exc:

@@ -183,6 +183,73 @@ def test_draft_cannot_be_edited_after_qc_starts(db, world):
         content.generate_draft(ctx, package, title="Edited", caption="Too late")
 
 
+def test_export_rejects_asset_path_traversal(db, world, tmp_path):
+    from packages.domain.assets import Asset
+    from packages.domain.editorial import OpportunityAsset
+
+    ws, profile, content = world
+    ctx = _ctx(ws, profile)
+    opp, package = _package_with_verified_asset(db, world, ctx)
+    asset_id = db.query(OpportunityAsset.ref_id).filter_by(opportunity_id=opp.id).scalar()
+    asset = db.get(Asset, asset_id)
+    asset.storage_path = "../private.png"
+    content.asset_root = tmp_path / "assets"
+    qc = content.run_qc(ctx, package)
+
+    assert qc["status"] == "FAIL"
+    assert qc["gates"]["visual"] == "FAIL"
+    with pytest.raises(PublicationBlocked, match="completed QC"):
+        content.approve(ctx, opp)
+
+
+def test_export_revalidates_asset_integrity_after_qc(db, world, tmp_path):
+    import hashlib
+
+    from packages.domain.editorial import OpportunityAsset
+
+    ws, profile, content = world
+    ctx = _ctx(ws, profile)
+    opp, package = _package_with_verified_asset(db, world, ctx)
+    asset_id = db.query(OpportunityAsset.ref_id).filter_by(opportunity_id=opp.id).scalar()
+    asset = db.get(Asset, asset_id)
+    asset_root = tmp_path / "assets"
+    asset_root.mkdir()
+    image_path = asset_root / f"{asset.id}.png"
+    image_path.write_bytes(b"validated image")
+    asset.storage_path = image_path.name
+    asset.file_hash = hashlib.sha256(image_path.read_bytes()).hexdigest()
+    content.asset_root = asset_root
+
+    qc = content.run_qc(ctx, package)
+    assert qc["status"] in ("PASS", "WARNING")
+    content.approve(ctx, opp)
+    image_path.write_bytes(b"tampered image")
+
+    with pytest.raises(PublicationBlocked, match="ASSET_FILES_VALID"):
+        content.export_package(ctx, package, platform="instagram")
+
+
+def test_qc_rejects_local_asset_without_hash(db, world, tmp_path):
+    from packages.domain.editorial import OpportunityAsset
+
+    ws, profile, content = world
+    ctx = _ctx(ws, profile)
+    opp, package = _package_with_verified_asset(db, world, ctx)
+    asset_id = db.query(OpportunityAsset.ref_id).filter_by(opportunity_id=opp.id).scalar()
+    asset = db.get(Asset, asset_id)
+    asset_root = tmp_path / "assets"
+    asset_root.mkdir()
+    asset.storage_path = "image.png"
+    asset.file_hash = None
+    (asset_root / asset.storage_path).write_bytes(b"image without recorded integrity hash")
+    content.asset_root = asset_root
+
+    qc = content.run_qc(ctx, package)
+
+    assert qc["status"] == "FAIL"
+    assert qc["gates"]["visual"] == "FAIL"
+
+
 def test_export_after_approval_creates_manifest(db, world):
     ws, profile, content = world
     ctx = _ctx(ws, profile)

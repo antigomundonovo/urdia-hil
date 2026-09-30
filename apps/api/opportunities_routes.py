@@ -5,6 +5,7 @@ Workspace-scoped; the detail response includes the Why Panel data (Doc 06).
 Content/QC actions live in content_routes.
 """
 
+from pathlib import Path
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -17,6 +18,7 @@ from packages.domain.knowledge import Claim
 from packages.domain.models import Profile
 from packages.research.opportunity import OpportunityService
 from packages.shared.db import get_session
+from packages.shared.settings import get_settings
 
 router = APIRouter(prefix="/api/v1")
 
@@ -83,7 +85,10 @@ def run_qc_for_opportunity(
     if package is None:
         raise HTTPException(status_code=404, detail="opportunity has no content package")
     ctx = OpportunityService(session).get_session_ctx(opp)
-    return ContentService(session).run_qc(ctx, package)
+    return ContentService(
+        session,
+        asset_root=Path(get_settings().asset_root),
+    ).run_qc(ctx, package)
 
 
 @router.post("/opportunities/{opportunity_id}/approve")
@@ -92,13 +97,16 @@ def approve_opportunity(
     workspace_id: UUID = Query(...),
     session: Session = Depends(get_session),
 ):
-    from packages.research.content import ContentService
+    from packages.research.content import ContentService, PublicationBlocked
 
     opp = OpportunityService(session).get_scoped(opportunity_id, workspace_id)
     if opp is None:
         raise HTTPException(status_code=404, detail="opportunity not found")
     ctx = OpportunityService(session).get_session_ctx(opp)
-    ContentService(session).approve(ctx, opp)
+    try:
+        ContentService(session).approve(ctx, opp)
+    except PublicationBlocked as err:
+        raise HTTPException(status_code=409, detail=str(err)) from err
     return {"opportunity_id": str(opp.id), "state": opp.state}
 
 
@@ -136,6 +144,7 @@ def get_opportunity(
             OpportunityClaim.opportunity_id == opp.id,
             OpportunityClaim.workspace_id == workspace_id,
             Claim.workspace_id == workspace_id,
+            Claim.profile_id == opp.profile_id,
         )
         .order_by(Claim.created_at, Claim.id)
     )

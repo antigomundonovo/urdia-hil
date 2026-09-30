@@ -15,16 +15,20 @@ import hashlib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
+from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from packages.domain.assets import RightsRecord
+from packages.domain.assets import Asset, RightsRecord
 from packages.domain.editorial import (
     CanonicalContent,
     ContentPackage,
     Draft,
     Opportunity,
+    OpportunityAsset,
+    OpportunityClaim,
     PlatformVariant,
 )
 from packages.domain.enums import (
@@ -37,12 +41,13 @@ from packages.domain.enums import (
     UncertaintyState,
 )
 from packages.domain.knowledge import Claim, EvidenceRecord
-from packages.domain.models import AuditEvent
+from packages.domain.models import AuditEvent, Source
 from packages.domain.repositories import AuditRepository
 from packages.governance.audit import append_audit
 from packages.research.opportunity import OpportunityService
 from packages.research.rights import rights_gate
 from packages.shared.execution_context import ExecutionContext
+from packages.shared.settings import get_settings
 
 
 class PublicationBlocked(Exception):
@@ -50,10 +55,67 @@ class PublicationBlocked(Exception):
 
 
 class ContentService:
-    def __init__(self, session: Session, export_root: Path | None = None) -> None:
+    MAX_EXPORT_IMAGE_BYTES = 25_000_000
+
+    def __init__(
+        self,
+        session: Session,
+        export_root: Path | None = None,
+        asset_root: Path | None = None,
+    ) -> None:
         self.session = session
         self.opps = OpportunityService(session)
         self.export_root = Path(export_root) if export_root else None
+        self.asset_root = Path(asset_root or get_settings().asset_root).resolve()
+
+    def _asset_file_path(self, asset: Asset) -> Path | None:
+        if not asset.storage_path:
+            return None
+        relative_path = Path(asset.storage_path)
+        if relative_path.is_absolute() or ".." in relative_path.parts:
+            raise PublicationBlocked("asset storage path is invalid")
+        source_path = self.asset_root / relative_path
+        if source_path.is_symlink():
+            raise PublicationBlocked("asset storage path cannot be a symlink")
+        try:
+            resolved_source = source_path.resolve(strict=True)
+            if not resolved_source.is_relative_to(self.asset_root):
+                raise PublicationBlocked("asset storage path is outside asset storage")
+            if not resolved_source.is_file():
+                raise PublicationBlocked("asset file is unavailable")
+            if resolved_source.stat().st_size > self.MAX_EXPORT_IMAGE_BYTES:
+                raise PublicationBlocked("asset file exceeds export size limit")
+            if not asset.file_hash:
+                raise PublicationBlocked("asset file hash is missing")
+            digest = hashlib.sha256()
+            total_size = 0
+            with resolved_source.open("rb") as image:
+                for chunk in iter(lambda: image.read(1024 * 1024), b""):
+                    total_size += len(chunk)
+                    if total_size > self.MAX_EXPORT_IMAGE_BYTES:
+                        raise PublicationBlocked("asset file exceeds export size limit")
+                    digest.update(chunk)
+            if digest.hexdigest() != asset.file_hash:
+                raise PublicationBlocked("asset file integrity check failed")
+        except OSError as exc:
+            raise PublicationBlocked("asset file is unavailable") from exc
+        return resolved_source
+
+    def _attached_claim_ids(
+        self, ctx: ExecutionContext, opp: Opportunity
+    ) -> set[UUID]:
+        return set(
+            self.session.scalars(
+                select(Claim.id)
+                .join(OpportunityClaim, OpportunityClaim.ref_id == Claim.id)
+                .where(
+                    OpportunityClaim.opportunity_id == opp.id,
+                    OpportunityClaim.workspace_id == ctx.workspace_id,
+                    Claim.workspace_id == ctx.workspace_id,
+                    Claim.profile_id == ctx.profile_id,
+                )
+            )
+        )
 
     def _require_current_passing_qc(
         self, ctx: ExecutionContext, opp: Opportunity
@@ -67,7 +129,7 @@ class ContentService:
         if package is None:
             raise PublicationBlocked("content package has no passing QC")
 
-        current_fingerprint = self._qc_input_fingerprint(package, opp)
+        current_fingerprint = self._qc_input_fingerprint(ctx, package, opp)
         qc_events = self.session.scalars(
             select(AuditEvent)
             .where(
@@ -85,7 +147,9 @@ class ContentService:
             raise PublicationBlocked("content package requires a current passing QC")
         return package
 
-    def _qc_input_fingerprint(self, package: ContentPackage, opp: Opportunity) -> str:
+    def _qc_input_fingerprint(
+        self, ctx: ExecutionContext, package: ContentPackage, opp: Opportunity
+    ) -> str:
         canonical = self.session.get(CanonicalContent, package.canonical_content_id)
         drafts = list(
             self.session.scalars(
@@ -98,25 +162,40 @@ class ContentService:
             for draft in drafts
             for claim_id in (draft.claim_ids_used or [])
         }
-        claims = list(
-            self.session.scalars(select(Claim).where(Claim.id.in_(claim_ids)))
-        ) if claim_ids else []
+        attached_claim_ids = self._attached_claim_ids(ctx, opp)
+        claims = (
+            list(
+                self.session.scalars(
+                    select(Claim).where(
+                        Claim.id.in_(claim_ids),
+                        Claim.workspace_id == ctx.workspace_id,
+                        Claim.profile_id == ctx.profile_id,
+                        Claim.id.in_(attached_claim_ids),
+                    )
+                )
+            )
+            if claim_ids and attached_claim_ids
+            else []
+        )
         claims.sort(key=lambda claim: str(claim.id))
         evidence = list(
             self.session.scalars(
                 select(EvidenceRecord).where(
-                    EvidenceRecord.claim_id.in_([claim.id for claim in claims])
+                    EvidenceRecord.claim_id.in_([claim.id for claim in claims]),
+                    EvidenceRecord.workspace_id == ctx.workspace_id,
+                    EvidenceRecord.profile_id == ctx.profile_id,
                 )
             )
         ) if claims else []
         evidence.sort(key=lambda record: str(record.id))
 
-        from packages.domain.editorial import OpportunityAsset, PlatformPlan
+        from packages.domain.editorial import PlatformPlan
 
         asset_ids = sorted(
             self.session.scalars(
                 select(OpportunityAsset.ref_id).where(
-                    OpportunityAsset.opportunity_id == opp.id
+                    OpportunityAsset.opportunity_id == opp.id,
+                    OpportunityAsset.workspace_id == ctx.workspace_id,
                 )
             ),
             key=str,
@@ -125,14 +204,21 @@ class ContentService:
         for asset_id in asset_ids:
             records = list(
                 self.session.scalars(
-                    select(RightsRecord).where(RightsRecord.asset_id == asset_id)
+                    select(RightsRecord).where(
+                        RightsRecord.asset_id == asset_id,
+                        RightsRecord.workspace_id == ctx.workspace_id,
+                        RightsRecord.profile_id == ctx.profile_id,
+                    )
                 )
             )
             records.sort(key=lambda record: str(record.id))
             rights.extend(records)
         plans = list(
             self.session.scalars(
-                select(PlatformPlan).where(PlatformPlan.opportunity_id == opp.id)
+                select(PlatformPlan).where(
+                    PlatformPlan.opportunity_id == opp.id,
+                    PlatformPlan.workspace_id == ctx.workspace_id,
+                )
             )
         )
         plans.sort(key=lambda plan: str(plan.id))
@@ -174,6 +260,22 @@ class ContentService:
                 for record in evidence
             ],
             "assets": [str(asset_id) for asset_id in asset_ids],
+            "asset_records": [
+                {
+                    "id": str(asset.id),
+                    "file_hash": asset.file_hash,
+                    "storage_path": asset.storage_path,
+                    "status": asset.status,
+                    "visual_classification": asset.visual_classification,
+                }
+                for asset in self.session.scalars(
+                    select(Asset).where(
+                        Asset.id.in_(asset_ids),
+                        Asset.workspace_id == ctx.workspace_id,
+                        Asset.profile_id == ctx.profile_id,
+                    )
+                )
+            ],
             "rights": [
                 {
                     "id": str(record.id),
@@ -240,13 +342,23 @@ class ContentService:
             OpportunityState.DRAFTING.value,
         ):
             raise PublicationBlocked("content cannot be edited after QC has started")
+        requested_claim_ids: set[UUID] = set()
+        try:
+            requested_claim_ids = {UUID(str(claim_id)) for claim_id in claim_ids_used or []}
+        except (TypeError, ValueError) as exc:
+            raise PublicationBlocked("draft references an invalid claim") from exc
+        attached_claim_ids = self._attached_claim_ids(ctx, opp)
+        if len(requested_claim_ids) != len(claim_ids_used or []):
+            raise PublicationBlocked("draft claim references must be unique")
+        if not requested_claim_ids.issubset(attached_claim_ids):
+            raise PublicationBlocked("draft claims must belong to the opportunity")
         draft = Draft(
             workspace_id=ctx.workspace_id,
             content_package_id=package.id,
             title=title,
             caption=caption,
             payload=payload or {},
-            claim_ids_used=claim_ids_used or [],
+            claim_ids_used=sorted(str(claim_id) for claim_id in requested_claim_ids),
         )
         self.session.add(draft)
         self.session.flush()
@@ -292,13 +404,40 @@ class ContentService:
 
         # EVIDENCE + FACTUALITY + UNCERTAINTY — from the claims actually used
         claim_ids = list(draft.claim_ids_used or []) if draft else []
+        attached_claim_ids = self._attached_claim_ids(ctx, opp)
+        try:
+            requested_claim_ids = {UUID(str(claim_id)) for claim_id in claim_ids}
+        except (TypeError, ValueError):
+            requested_claim_ids = set()
+            _set(QualityGate.EVIDENCE, GateResult.FAIL, "draft references an invalid claim")
+        invalid_claim_refs = len(requested_claim_ids) != len(claim_ids) or not (
+            requested_claim_ids.issubset(attached_claim_ids)
+        )
         claims = (
-            list(self.session.scalars(select(Claim).where(Claim.id.in_(claim_ids))))
-            if claim_ids
+            list(
+                self.session.scalars(
+                    select(Claim).where(
+                        Claim.id.in_(requested_claim_ids),
+                        Claim.workspace_id == ctx.workspace_id,
+                        Claim.profile_id == ctx.profile_id,
+                    )
+                )
+            )
+            if requested_claim_ids
             else []
         )
-        if not claim_ids:
+        if invalid_claim_refs:
+            _set(
+                QualityGate.EVIDENCE,
+                GateResult.FAIL,
+                "draft references a claim outside this opportunity",
+            )
+            _set(QualityGate.FACTUALITY, GateResult.FAIL)
+            _set(QualityGate.UNCERTAINTY, GateResult.FAIL)
+        elif not claim_ids:
             _set(QualityGate.EVIDENCE, GateResult.FAIL, "no claims referenced")
+            _set(QualityGate.FACTUALITY, GateResult.FAIL)
+            _set(QualityGate.UNCERTAINTY, GateResult.FAIL)
         else:
             missing = []
             controversial = []
@@ -307,6 +446,8 @@ class ContentService:
                     self.session.scalars(
                         select(EvidenceRecord).where(
                             EvidenceRecord.claim_id == claim.id,
+                            EvidenceRecord.workspace_id == ctx.workspace_id,
+                            EvidenceRecord.profile_id == ctx.profile_id,
                             EvidenceRecord.supports.is_(True),
                         )
                     )
@@ -324,6 +465,10 @@ class ContentService:
                 )
             else:
                 _set(QualityGate.EVIDENCE, GateResult.PASS)
+            missing.extend(
+                str(claim_id)
+                for claim_id in requested_claim_ids - {claim.id for claim in claims}
+            )
             _set(QualityGate.FACTUALITY, GateResult.PASS if not missing else GateResult.FAIL)
             _set(
                 QualityGate.UNCERTAINTY,
@@ -336,19 +481,40 @@ class ContentService:
             )
 
         # RIGHTS — every asset of the opportunity through the gate
-        from packages.domain.editorial import OpportunityAsset
-
         asset_ids = list(
             self.session.scalars(
-                select(OpportunityAsset.ref_id).where(OpportunityAsset.opportunity_id == opp.id)
+                select(OpportunityAsset.ref_id).where(
+                    OpportunityAsset.opportunity_id == opp.id,
+                    OpportunityAsset.workspace_id == ctx.workspace_id,
+                )
             )
         )
         rights_ok = True
+        visual_files_ok = True
         for aid in asset_ids:
+            asset = self.session.scalar(
+                select(Asset).where(
+                    Asset.id == aid,
+                    Asset.workspace_id == ctx.workspace_id,
+                    Asset.profile_id == ctx.profile_id,
+                    Asset.status == "ACTIVE",
+                )
+            )
+            if asset is None:
+                visual_files_ok = False
+            else:
+                try:
+                    self._asset_file_path(asset)
+                except PublicationBlocked:
+                    visual_files_ok = False
             record = self.session.scalars(
                 select(RightsRecord)
-                .where(RightsRecord.asset_id == aid)
-                .order_by(RightsRecord.created_at.desc())
+                .where(
+                    RightsRecord.asset_id == aid,
+                    RightsRecord.workspace_id == ctx.workspace_id,
+                    RightsRecord.profile_id == ctx.profile_id,
+                )
+                .order_by(RightsRecord.created_at.desc(), RightsRecord.id.desc())
                 .limit(1)
             ).first()
             if record is None or record.status != "VERIFIED" or rights_gate(
@@ -367,8 +533,8 @@ class ContentService:
         # VISUAL — assets exist
         _set(
             QualityGate.VISUAL,
-            GateResult.PASS if asset_ids else GateResult.FAIL,
-            "no assets attached",
+            GateResult.PASS if asset_ids and visual_files_ok else GateResult.FAIL,
+            "asset missing or local image failed integrity validation",
         )
 
         # ORIGINALITY — deterministic shingle check of the draft against the
@@ -376,7 +542,11 @@ class ContentService:
         source_texts: list[tuple[str, str]] = []
         if claim_ids:
             for record in self.session.scalars(
-                select(EvidenceRecord).where(EvidenceRecord.claim_id.in_(claim_ids))
+                select(EvidenceRecord).where(
+                    EvidenceRecord.claim_id.in_(requested_claim_ids),
+                    EvidenceRecord.workspace_id == ctx.workspace_id,
+                    EvidenceRecord.profile_id == ctx.profile_id,
+                )
             ):
                 if record.excerpt:
                     source_texts.append((f"evidence:{record.id}", record.excerpt))
@@ -459,7 +629,7 @@ class ContentService:
             new_state=overall.value,
             metadata={
                 "gates": gates,
-                "input_fingerprint": self._qc_input_fingerprint(package, opp),
+                "input_fingerprint": self._qc_input_fingerprint(ctx, package, opp),
             },
         )
         if opp.state == OpportunityState.DRAFTING.value and overall is not GateResult.FAIL:
@@ -527,18 +697,44 @@ class ContentService:
             for e in audit
         )
 
-        # RIGHTS_VERIFIED for every asset
-        from packages.domain.editorial import OpportunityAsset
-
+        # Revalidate asset ownership and local bytes at export time as well.
         asset_ids = list(
             self.session.scalars(
-                select(OpportunityAsset.ref_id).where(OpportunityAsset.opportunity_id == opp.id)
+                select(OpportunityAsset.ref_id).where(
+                    OpportunityAsset.opportunity_id == opp.id,
+                    OpportunityAsset.workspace_id == ctx.workspace_id,
+                )
             )
         )
+        assets = list(
+            self.session.scalars(
+                select(Asset).where(
+                    Asset.id.in_(asset_ids),
+                    Asset.workspace_id == ctx.workspace_id,
+                    Asset.profile_id == ctx.profile_id,
+                    Asset.status == "ACTIVE",
+                )
+            )
+        ) if asset_ids else []
+        assets_by_id = {asset.id: asset for asset in assets}
+        checks["ASSET_FILES_VALID"] = bool(asset_ids) and len(assets) == len(set(asset_ids))
+        if checks["ASSET_FILES_VALID"]:
+            for asset in assets:
+                try:
+                    self._asset_file_path(asset)
+                except PublicationBlocked:
+                    checks["ASSET_FILES_VALID"] = False
+                    break
+
+        # RIGHTS_VERIFIED for every asset
         def _asset_verified(aid) -> bool:
             record = self.session.scalars(
                 select(RightsRecord)
-                .where(RightsRecord.asset_id == aid)
+                .where(
+                    RightsRecord.asset_id == aid,
+                    RightsRecord.workspace_id == ctx.workspace_id,
+                    RightsRecord.profile_id == ctx.profile_id,
+                )
                 .order_by(RightsRecord.created_at.desc())
                 .limit(1)
             ).first()
@@ -549,6 +745,9 @@ class ContentService:
                 is RightsGateOutcome.MAY_PROCEED
             )
 
+        checks["ASSET_FILES_VALID"] = checks["ASSET_FILES_VALID"] and all(
+            aid in assets_by_id for aid in asset_ids
+        )
         checks["RIGHTS_VERIFIED"] = bool(asset_ids) and all(
             _asset_verified(aid) for aid in asset_ids
         )
@@ -581,6 +780,7 @@ class ContentService:
         export_dir = self.export_root / f"post-{date_part}-{short_id}"
         for sub in ("image", "captions", "sources", "rights", "platform_variants"):
             (export_dir / sub).mkdir(parents=True, exist_ok=True)
+        (export_dir / "manifest.json").unlink(missing_ok=True)
 
         draft = self.session.scalars(
             select(Draft).where(Draft.content_package_id == package.id).limit(1)
@@ -589,6 +789,227 @@ class ContentService:
             (export_dir / "captions" / "caption.txt").write_text(
                 f"{draft.title or ''}\n\n{draft.caption or ''}", encoding="utf-8"
             )
+
+        asset_ids = list(
+            self.session.scalars(
+                select(OpportunityAsset.ref_id).where(
+                    OpportunityAsset.opportunity_id == opp.id,
+                    OpportunityAsset.workspace_id == ctx.workspace_id,
+                )
+            )
+        )
+        assets = list(
+            self.session.scalars(
+                select(Asset).where(
+                    Asset.id.in_(asset_ids),
+                    Asset.workspace_id == ctx.workspace_id,
+                    Asset.profile_id == ctx.profile_id,
+                    Asset.status == "ACTIVE",
+                )
+            )
+        ) if asset_ids else []
+        if len(assets) != len(set(asset_ids)):
+            raise PublicationBlocked("an opportunity asset is unavailable")
+        exported_assets: list[dict[str, Any]] = []
+        for asset in sorted(assets, key=lambda item: str(item.id)):
+            filename = f"{asset.id}.bin"
+            included = False
+            if asset.storage_path:
+                relative_path = Path(asset.storage_path)
+                resolved_source = self._asset_file_path(asset)
+                if resolved_source is None:
+                    raise PublicationBlocked("asset file is unavailable")
+                file_content = resolved_source.read_bytes()
+                if len(file_content) > self.MAX_EXPORT_IMAGE_BYTES:
+                    raise PublicationBlocked("asset file exceeds export size limit")
+                if hashlib.sha256(file_content).hexdigest() != asset.file_hash:
+                    raise PublicationBlocked("asset file integrity check failed")
+                suffix = relative_path.suffix.lower()
+                if suffix not in {".jpg", ".jpeg", ".png", ".webp", ".tif", ".tiff"}:
+                    suffix = ".bin"
+                filename = f"{asset.id}{suffix}"
+                (export_dir / "image" / filename).write_bytes(file_content)
+                included = True
+
+            rights = self.session.scalars(
+                select(RightsRecord)
+                .where(
+                    RightsRecord.asset_id == asset.id,
+                    RightsRecord.workspace_id == ctx.workspace_id,
+                    RightsRecord.profile_id == ctx.profile_id,
+                )
+                .order_by(RightsRecord.created_at.desc(), RightsRecord.id.desc())
+                .limit(1)
+            ).first()
+            (export_dir / "image" / f"{asset.id}.json").write_text(
+                json.dumps(
+                    {
+                        "asset_id": str(asset.id),
+                        "asset_type": asset.asset_type,
+                        "filename": filename if included else None,
+                        "file_included": included,
+                        "file_hash": asset.file_hash,
+                        "original_file_url": asset.original_file_url,
+                        "page_url": asset.page_url,
+                        "institution": asset.institution,
+                        "creator": asset.creator,
+                        "creation_date": asset.creation_date,
+                        "visual_classification": asset.visual_classification,
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+            exported_assets.append(
+                {
+                    "asset_id": str(asset.id),
+                    "file_included": included,
+                    "filename": filename if included else None,
+                    "rights_record_id": str(rights.id) if rights else None,
+                }
+            )
+            if rights:
+                (export_dir / "rights" / f"{asset.id}.json").write_text(
+                    json.dumps(
+                        {
+                            "asset_id": str(asset.id),
+                            "classification": rights.classification,
+                            "status": rights.status,
+                            "license": rights.license,
+                            "license_url": rights.license_url,
+                            "rights_holder": rights.rights_holder,
+                            "attribution_required": rights.attribution_required,
+                            "attribution_text": rights.attribution_text,
+                            "territory": rights.territory,
+                            "commercial_use": rights.commercial_use,
+                            "modification_allowed": rights.modification_allowed,
+                            "evidence_source_id": (
+                                str(rights.evidence_source_id)
+                                if rights.evidence_source_id
+                                else None
+                            ),
+                            "confidence": rights.confidence,
+                            "verified_at": (
+                                rights.verified_at.isoformat() if rights.verified_at else None
+                            ),
+                        },
+                        indent=2,
+                        ensure_ascii=False,
+                    ),
+                    encoding="utf-8",
+                )
+
+        try:
+            used_claim_ids = (
+                {UUID(str(claim_id)) for claim_id in (draft.claim_ids_used or [])}
+                if draft
+                else set()
+            )
+        except (TypeError, ValueError) as exc:
+            raise PublicationBlocked("draft claim references are invalid") from exc
+        attached_claim_ids = self._attached_claim_ids(ctx, opp)
+        used_claims = list(
+            self.session.scalars(
+                select(Claim).where(
+                    Claim.id.in_(used_claim_ids),
+                    Claim.workspace_id == ctx.workspace_id,
+                    Claim.profile_id == ctx.profile_id,
+                    Claim.id.in_(attached_claim_ids),
+                )
+            )
+        ) if used_claim_ids else []
+        evidence = list(
+            self.session.scalars(
+                select(EvidenceRecord).where(
+                    EvidenceRecord.claim_id.in_([claim.id for claim in used_claims]),
+                    EvidenceRecord.workspace_id == ctx.workspace_id,
+                    EvidenceRecord.profile_id == ctx.profile_id,
+                )
+            )
+        ) if used_claims else []
+        source_ids = {
+            record.source_id for record in evidence if record.source_id is not None
+        }
+        source_ids.update(
+            asset_rights.evidence_source_id
+            for asset_rights in self.session.scalars(
+                select(RightsRecord).where(
+                    RightsRecord.asset_id.in_(asset_ids),
+                    RightsRecord.workspace_id == ctx.workspace_id,
+                    RightsRecord.profile_id == ctx.profile_id,
+                    RightsRecord.status == "VERIFIED",
+                )
+            )
+            if asset_rights.evidence_source_id is not None
+        )
+        sources = list(
+            self.session.scalars(
+                select(Source).where(
+                    Source.id.in_(source_ids),
+                    Source.workspace_id == ctx.workspace_id,
+                    Source.profile_id == ctx.profile_id,
+                )
+            )
+        ) if source_ids else []
+        for source in sources:
+            (export_dir / "sources" / f"{source.id}.json").write_text(
+                json.dumps(
+                    {
+                        "source_id": str(source.id),
+                        "title": source.title,
+                        "publisher": source.publisher,
+                        "author": source.author,
+                        "url": source.url,
+                        "canonical_url": source.canonical_url,
+                        "publication_date": (
+                            source.publication_date.isoformat()
+                            if source.publication_date
+                            else None
+                        ),
+                    },
+                    indent=2,
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+        (export_dir / "sources" / "claims-and-evidence.json").write_text(
+            json.dumps(
+                {
+                    "claims": [
+                        {
+                            "claim_id": str(claim.id),
+                            "text": (
+                                claim.editorial_wording
+                                or claim.normalized_text
+                                or f"{claim.subject or ''} {claim.predicate or ''} "
+                                f"{claim.object or ''}".strip()
+                            ),
+                            "status": (
+                                claim.status.value
+                                if hasattr(claim.status, "value")
+                                else str(claim.status)
+                            ),
+                        }
+                        for claim in used_claims
+                    ],
+                    "evidence": [
+                        {
+                            "evidence_id": str(record.id),
+                            "claim_id": str(record.claim_id),
+                            "source_id": str(record.source_id) if record.source_id else None,
+                            "supports": record.supports,
+                            "excerpt": record.excerpt,
+                            "page_reference": record.page_reference,
+                        }
+                        for record in evidence
+                    ],
+                },
+                indent=2,
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
 
         variant = PlatformVariant(
             workspace_id=ctx.workspace_id,
@@ -607,6 +1028,9 @@ class ContentService:
             "export_version": 1,
             "rules": {"rights": "rights-1.0", "verification": "verification-1.0"},
             "human_approved": True,
+            "assets": exported_assets,
+            "source_count": len(sources),
+            "claim_count": len(used_claims),
         }
         (export_dir / "manifest.json").write_text(
             json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8"
