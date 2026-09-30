@@ -13,7 +13,14 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from packages.domain.models import AuditEvent, Job, Profile, Workspace, WorkspaceMember
+from packages.domain.models import (
+    AuditEvent,
+    Job,
+    Profile,
+    Source,
+    Workspace,
+    WorkspaceMember,
+)
 
 
 class WorkspaceRepository:
@@ -186,3 +193,31 @@ class AuditRepository:
             .where(AuditEvent.metadata_["capability"].as_string() == capability_key)
         )
         return len(list(self.session.scalars(stmt)))
+
+
+class SourceRepository:
+    """Sources (Doc 04 fields, Doc 09 source programs). All reads scoped."""
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def create(self, workspace_id: UUID, profile_id: UUID | None, **fields) -> Source:
+        source = Source(workspace_id=workspace_id, profile_id=profile_id, **fields)
+        self.session.add(source)
+        self.session.flush()
+        return source
+
+    def get_scoped(self, source_id: UUID, workspace_id: UUID) -> Source | None:
+        source = self.session.get(Source, source_id)
+        if source is None or source.workspace_id != workspace_id:
+            return None
+        return source
+
+    def list_for_profile(self, workspace_id: UUID, profile_id: UUID) -> list[Source]:
+        return list(
+            self.session.scalars(
+                select(Source)
+                .where(Source.workspace_id == workspace_id, Source.profile_id == profile_id)
+                .order_by(Source.created_at.desc())
+            )
+        )

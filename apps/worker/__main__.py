@@ -14,9 +14,11 @@ from packages.shared.db import SessionLocal
 
 
 def build_handlers() -> dict:
-    """Job handlers are registered here as milestones land (Doc 17 order).
-    Discovery/source handlers arrive at steps 16-17."""
-    return {}
+    """Job handlers registered as milestones land (Doc 17 order).
+    SOURCE_RETRIEVAL reuses the discovery scan for a single source."""
+    from apps.worker.handlers import discovery_scan
+
+    return {"DISCOVERY_SCAN": discovery_scan, "SOURCE_RETRIEVAL": discovery_scan}
 
 
 def run_forever(poll_seconds: float = 2.0) -> int:

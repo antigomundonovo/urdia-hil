@@ -26,6 +26,8 @@ def _job_payload(job) -> dict:
         "status": job.status,
         "attempt": job.attempt,
         "max_attempts": job.max_attempts,
+        "payload": job.payload,
+        "result": job.result,
         "checkpoint": job.checkpoint,
         "error": job.error,
         "created_at": job.created_at.isoformat() if job.created_at else None,

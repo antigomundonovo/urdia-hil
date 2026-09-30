@@ -208,3 +208,124 @@ class AuditEvent(Base, TimestampMixin):
         Index("ix_audit_profile_id", "profile_id"),
         Index("ix_audit_timestamp", "timestamp"),
     )
+
+
+# --- Research tables (Doc 04 "Research tables", Doc 09) -------------------
+
+
+class Source(Base, TimestampMixin):
+    """Fields per Doc 04."""
+
+    __tablename__ = "sources"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id"), nullable=False)
+    profile_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("profiles.id"))
+    publisher: Mapped[str | None] = mapped_column(String(255))
+    author: Mapped[str | None] = mapped_column(String(255))
+    title: Mapped[str | None] = mapped_column(String(512))
+    url: Mapped[str] = mapped_column(String(2048), nullable=False)
+    canonical_url: Mapped[str | None] = mapped_column(String(2048))
+    source_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    publication_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    event_proximity: Mapped[str | None] = mapped_column(String(32))
+    language: Mapped[str | None] = mapped_column(String(16))
+    jurisdiction: Mapped[str | None] = mapped_column(String(64))
+    access_type: Mapped[str | None] = mapped_column(String(32))
+    archive_status: Mapped[str | None] = mapped_column(String(32))
+    reliability_profile: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    correction_history: Mapped[list[Any] | None] = mapped_column(JSONB)
+    metadata_: Mapped[dict[str, Any] | None] = mapped_column("metadata", JSONB)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="ACTIVE")
+    first_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        Index("ix_sources_workspace_id", "workspace_id"),
+        Index("ix_sources_profile_id", "profile_id"),
+        Index("ix_sources_canonical_url", "canonical_url"),
+        Index("ix_sources_status", "status"),
+    )
+
+
+class Retrieval(Base, TimestampMixin):
+    """Observability per fetch (Doc 09: registrar query/source, duração,
+    resultados, erros). Append-only history — never overwritten."""
+
+    __tablename__ = "retrievals"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id"), nullable=False)
+    profile_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("profiles.id"))
+    source_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("sources.id"), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    http_status: Mapped[int | None] = mapped_column(Integer)
+    content_hash: Mapped[str | None] = mapped_column(String(64))
+    etag: Mapped[str | None] = mapped_column(String(256))
+    last_modified: Mapped[str | None] = mapped_column(String(128))
+    duration_ms: Mapped[int | None] = mapped_column(Integer)
+    item_count: Mapped[int | None] = mapped_column(Integer)
+    error: Mapped[str | None] = mapped_column(Text)
+    metadata_: Mapped[dict[str, Any] | None] = mapped_column("metadata", JSONB)
+
+    __table_args__ = (
+        Index("ix_retrievals_source_id", "source_id"),
+        Index("ix_retrievals_created_at", "created_at"),
+    )
+
+
+class SourceRelation(Base, TimestampMixin):
+    """Dependency chains (Doc 09): A cita B, B reproduz C — clusters, never
+    counted as independent confirmations."""
+
+    __tablename__ = "source_relations"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id"), nullable=False)
+    source_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("sources.id"), nullable=False)
+    related_source_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("sources.id"), nullable=False
+    )
+    relation_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    confidence: Mapped[int | None] = mapped_column(Integer)
+
+    __table_args__ = (Index("ix_source_relations_source_id", "source_id"),)
+
+
+class DiscoveryCluster(Base, TimestampMixin):
+    __tablename__ = "discovery_clusters"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id"), nullable=False)
+    profile_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("profiles.id"))
+    label: Mapped[str | None] = mapped_column(String(512))
+    item_count: Mapped[int | None] = mapped_column(Integer)
+
+    __table_args__ = (Index("ix_discovery_clusters_workspace_id", "workspace_id"),)
+
+
+class DiscoveryItem(Base, TimestampMixin):
+    __tablename__ = "discovery_items"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id"), nullable=False)
+    profile_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("profiles.id"))
+    source_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("sources.id"))
+    cluster_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("discovery_clusters.id"))
+    url: Mapped[str | None] = mapped_column(String(2048))
+    title: Mapped[str | None] = mapped_column(String(512))
+    summary: Mapped[str | None] = mapped_column(Text)
+    content_hash: Mapped[str | None] = mapped_column(String(64))
+    raw: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="NORMALIZED")
+    discovered_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        Index("ix_discovery_items_workspace_id", "workspace_id"),
+        Index("ix_discovery_items_status", "status"),
+        Index("ix_discovery_items_content_hash", "content_hash"),
+    )

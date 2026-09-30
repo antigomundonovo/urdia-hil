@@ -1,0 +1,52 @@
+"""Job handlers (Doc 17 step 13 wiring). Registered into the JobEngine;
+each handler opens its own session so the worker loop stays transaction-safe.
+
+DISCOVERY_SCAN payload:
+  {"workspace_id": "...", "profile_id": "...", "source_id": "..." (optional —
+   single-source scan for POST /sources/{id}/retrieve)}
+"""
+
+import uuid
+from typing import Any
+
+from apps.worker.engine import JobProgress
+from packages.research.discovery import DiscoveryEngine
+from packages.research.fetcher import SafeFetcher
+from packages.shared.db import SessionLocal
+from packages.shared.execution_context import ExecutionContext
+
+
+def discovery_scan(ctx: ExecutionContext, payload: dict[str, Any], progress: JobProgress) -> dict:
+    from packages.domain.models import Source
+
+    progress.done("resolve_sources")
+    progress.next("fetch")
+    workspace_id = uuid.UUID(str(payload["workspace_id"]))
+    profile_id = uuid.UUID(str(payload["profile_id"])) if payload.get("profile_id") else None
+    source_id = uuid.UUID(str(payload["source_id"])) if payload.get("source_id") else None
+
+    with SessionLocal() as session:
+        fetcher = SafeFetcher()
+        engine = DiscoveryEngine(session, fetcher)
+        if source_id is not None:
+            source = session.get(Source, source_id)
+            if source is None or source.workspace_id != workspace_id:
+                raise ValueError("source not found in workspace")
+            sources = [source]
+        elif profile_id is not None:
+            sources = engine.active_sources(workspace_id, profile_id)
+        else:
+            raise ValueError("payload requires source_id or profile_id")
+
+        progress.done("fetch")
+        progress.next("normalize_and_cluster")
+        reports = [engine.scan_source(source) for source in sources]
+        session.commit()
+
+    progress.done("normalize_and_cluster")
+    return {
+        "scanned": len(reports),
+        "items_new": sum(r.items_new for r in reports),
+        "duplicates": sum(r.duplicates for r in reports),
+        "failed": [str(r.source_id) for r in reports if r.status == "FAILED"],
+    }
