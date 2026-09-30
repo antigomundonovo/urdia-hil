@@ -4,9 +4,22 @@ import { api, Source } from "../api";
 import { useProfile } from "../profile";
 
 const SOURCE_TYPES = [
-  "rss", "atom", "sitemap", "search", "gdelt", "wikidata", "wikipedia",
-  "openalex", "crossref", "wayback", "internet_archive", "wikimedia",
+  { value: "rss", available: true },
+  { value: "atom", available: true },
+  { value: "sitemap", available: true },
+  { value: "search", available: false },
+  { value: "gdelt", available: true },
+  { value: "wikidata", available: true },
+  { value: "wikipedia", available: true },
+  { value: "openalex", available: true },
+  { value: "crossref", available: true },
+  { value: "wayback", available: false },
+  { value: "internet_archive", available: false },
+  { value: "wikimedia", available: false },
 ];
+const AVAILABLE_SOURCE_TYPES = new Set(
+  SOURCE_TYPES.filter((sourceType) => sourceType.available).map((sourceType) => sourceType.value),
+);
 
 export default function Sources() {
   const { profile, workspaceId } = useProfile();
@@ -74,8 +87,15 @@ export default function Sources() {
             onChange={(e) => setType(e.target.value)}
             className="rounded border border-stone-300 px-3 py-2 text-sm"
           >
-            {SOURCE_TYPES.map((t) => (
-              <option key={t} value={t}>{t}</option>
+            {SOURCE_TYPES.map((sourceType) => (
+              <option
+                key={sourceType.value}
+                value={sourceType.value}
+                disabled={!sourceType.available}
+              >
+                {sourceType.value}
+                {sourceType.available ? "" : " (indisponível na V1)"}
+              </option>
             ))}
           </select>
           <button
@@ -106,15 +126,20 @@ export default function Sources() {
                   <p className="font-medium text-stone-800">{s.title ?? s.url}</p>
                   <p className="text-xs text-stone-400">{s.url}</p>
                 </td>
-                <td className="px-4 py-3 text-stone-600">{s.source_type}</td>
+                <td className="px-4 py-3 text-stone-600">
+                  {s.source_type}
+                  {!AVAILABLE_SOURCE_TYPES.has(s.source_type) && (
+                    <span className="ml-2 text-xs text-stone-400">indisponível na V1</span>
+                  )}
+                </td>
                 <td className="px-4 py-3 text-stone-600">{s.status}</td>
                 <td className="px-4 py-3 text-right">
                   <button
                     onClick={() => retrieve.mutate(s.id)}
-                    disabled={retrieve.isPending}
+                    disabled={retrieve.isPending || !AVAILABLE_SOURCE_TYPES.has(s.source_type)}
                     className="rounded border border-amber-700 px-3 py-1.5 text-xs font-medium text-amber-800 hover:bg-amber-50 disabled:opacity-40"
                   >
-                    Varrer agora
+                    {AVAILABLE_SOURCE_TYPES.has(s.source_type) ? "Varrer agora" : "Indisponível"}
                   </button>
                 </td>
               </tr>
@@ -131,7 +156,8 @@ export default function Sources() {
       </div>
       <p className="text-xs text-stone-400">
         O varredor respeita robots.txt, limita tamanho e tempo, e bloqueia endereços
-        internos — Documento 08/09.
+        internos — Documento 08/09. Adaptadores indisponíveis ficam desabilitados até
+        serem implementados.
       </p>
     </div>
   );
