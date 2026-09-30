@@ -48,6 +48,7 @@ def run_forever(poll_seconds: float = 2.0) -> int:
                     session.commit()
                     time.sleep(poll_seconds)
                     continue
+                session.commit()
                 log.info("running job %s (%s) attempt %s", job.id, job.job_type, job.attempt)
                 engine.run_job(job)
                 session.commit()
@@ -73,8 +74,10 @@ def run_once() -> int:
             print(f"recovered {recovered} RUNNING job(s)")
         job = engine.claim_next()
         if job is None:
+            session.commit()
             print("no pending jobs")
             return 0
+        session.commit()
         engine.run_job(job)
         session.commit()
         print(f"job {job.id} → {job.status}")

@@ -9,8 +9,14 @@ from apps.worker.engine import JOB_FAILED, JOB_PENDING, JobEngine, RetryableJobE
 
 
 class _Session:
+    def __init__(self):
+        self.commit_calls = 0
+
     def flush(self):
         pass
+
+    def commit(self):
+        self.commit_calls += 1
 
     def get(self, model, job_id):
         return self.job
@@ -104,3 +110,22 @@ def test_retry_and_cancel_audit_status_changes(monkeypatch):
     assert audit_events[-1]["action"] == "JOB_CANCELLED"
     assert audit_events[-1]["previous_state"] == JOB_PENDING
     assert audit_events[-1]["new_state"] == worker_engine.JOB_CANCELLED
+
+
+def test_progress_checkpoints_commit_immediately(monkeypatch):
+    monkeypatch.setattr(worker_engine, "append_audit", lambda *args, **kwargs: None)
+    session = _Session()
+    job = _job()
+
+    def handler(ctx, payload, progress):
+        progress.done("fetch")
+        assert session.commit_calls == 1
+        progress.next("extract")
+        assert session.commit_calls == 2
+        return {"ok": True}
+
+    JobEngine(session, {"DISCOVERY_SCAN": handler}).run_job(job)
+
+    assert job.checkpoint == {"completed_steps": ["fetch"], "next_step": "extract"}
+    assert job.status == "SUCCEEDED"
+    assert session.commit_calls == 2

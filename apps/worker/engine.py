@@ -137,6 +137,7 @@ class JobEngine:
         def persist(snapshot: dict[str, Any]) -> None:
             job.checkpoint = snapshot
             self.session.flush()
+            self.session.commit()
 
         progress = JobProgress(
             completed=list((job.checkpoint or {}).get("completed_steps", [])),
