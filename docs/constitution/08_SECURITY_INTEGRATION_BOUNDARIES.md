@@ -83,6 +83,9 @@ exists.
 This local-first milestone does not yet implement MFA, distributed rate-limit
 storage, or external account connections. Do not expose self-registration
 publicly until production-grade shared rate limiting and MFA are available.
+The API therefore rejects self-registration unless `APP_ENV` is `development`
+or `test`; deploying a publicly reachable service must not enable registration
+until both safeguards are implemented.
 External OAuth tokens remain backend-only and are not implemented by this
 milestone.
 

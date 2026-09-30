@@ -145,3 +145,39 @@ def test_register_verify_login_me_logout_and_revocation(db, monkeypatch):
         assert client.get("/api/v1/auth/me").status_code == 401
     finally:
         app.dependency_overrides.clear()
+
+
+def test_registration_is_disabled_outside_local_environments(db, monkeypatch):
+    from apps.api import auth_routes
+    from packages.domain.models import User
+    from packages.shared.settings import Settings
+
+    monkeypatch.setattr(
+        auth_routes,
+        "get_settings",
+        lambda: Settings(
+            app_env="production",
+            smtp_host="mail.example.test",
+            smtp_from_email="noreply@example.test",
+        ),
+    )
+
+    def override_session():
+        yield db
+
+    email = f"blocked-{uuid4().hex}@example.test"
+    app.dependency_overrides[get_session] = override_session
+    try:
+        response = TestClient(app).post(
+            "/api/v1/auth/register",
+            headers={"Origin": "http://localhost:5173"},
+            json={
+                "email": email,
+                "password": "a-strong-test-password",
+            },
+        )
+
+        assert response.status_code == 503
+        assert db.query(User).filter_by(email=email).first() is None
+    finally:
+        app.dependency_overrides.clear()

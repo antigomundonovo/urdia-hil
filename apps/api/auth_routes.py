@@ -288,8 +288,13 @@ def register(
     session: Session = Depends(get_session),
 ):
     require_allowed_origin(request)
-    _rate_limit_request(request, "REGISTER_ACCOUNT")
     settings = get_settings()
+    if settings.app_env.lower() not in {"development", "test"}:
+        raise HTTPException(
+            status_code=503,
+            detail="self-registration is disabled outside local environments",
+        )
+    _rate_limit_request(request, "REGISTER_ACCOUNT")
     if not settings.smtp_host or not settings.smtp_from_email:
         raise HTTPException(status_code=503, detail="email verification is not configured")
     response.headers["Cache-Control"] = "no-store"
