@@ -17,6 +17,9 @@ Data Minimization
 Toda operação por ID verifica pertencimento ao workspace/profile antes de revelar dados.
 
 Não confiar apenas em parâmetros enviados pelo frontend.
+Relacionamentos entre oportunidades, claims, fontes, assets e direitos também
+validam o mesmo workspace/profile; IDs válidos isoladamente não autorizam
+vincular dados de outro perfil.
 
 ## Agent boundary
 Agentes não recebem:
