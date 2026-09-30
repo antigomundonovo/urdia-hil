@@ -8,6 +8,7 @@ from packages.providers.laya import LayaDecisionProvider
 class FakeRouter:
     def __init__(self):
         self.calls = []
+        self.loaded_revisions = {"multilingual": "reviewed-sha"}
 
     def predict(self, state, questions, **kwargs):
         self.calls.append((state, questions, kwargs))
@@ -42,6 +43,7 @@ def test_laya_provider_returns_advisory_result_and_routes_language():
     assert result["confidence_policy"] == "UNVALIDATED_DO_NOT_GATE"
     assert result["answers"]["topic"]["choice"] == "history"
     assert result["routing"]["model"] == "english"
+    assert result["checkpoint_revisions"] == {"multilingual": "reviewed-sha"}
     assert router.calls == [
         (payload["state"], payload["questions"], {"lang": "pt"})
     ]

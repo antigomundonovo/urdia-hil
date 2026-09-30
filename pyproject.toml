@@ -33,6 +33,7 @@ laya = [
 [project.scripts]
 urdia-doctor = "scripts.doctor:main"
 urdia-seed = "scripts.seed:seed"
+urdia-laya-shadow = "scripts.laya_shadow:main"
 
 [tool.setuptools.packages.find]
 include = ["apps*", "packages*", "scripts*"]

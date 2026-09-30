@@ -143,7 +143,8 @@ class LayaDecisionProvider:
         if "lang" in payload:
             kwargs["lang"] = payload["lang"]
 
-        result = self._get_router().predict(
+        router = self._get_router()
+        result = router.predict(
             payload["state"],
             payload["questions"],
             **kwargs,
@@ -158,10 +159,18 @@ class LayaDecisionProvider:
             package_version = version("laya")
         except PackageNotFoundError:
             package_version = "0.3.22"
+        loaded_revisions = getattr(router, "loaded_revisions", {})
+        if not isinstance(loaded_revisions, Mapping):
+            loaded_revisions = {}
 
         return {
             "provider": self.key,
             "package_version": package_version,
+            "checkpoint_revisions": {
+                name: revision
+                for name, revision in loaded_revisions.items()
+                if isinstance(name, str) and (revision is None or isinstance(revision, str))
+            },
             "mode": "ADVISORY",
             "confidence_policy": "UNVALIDATED_DO_NOT_GATE",
             "answers": result["answers"],

@@ -14,6 +14,37 @@ O primeiro uso precisa de acesso ao Hugging Face para baixar o modelo; a
 inferência ocorre localmente no processo e não envia o estado a uma API de
 inferência remota.
 
+## Avaliação shadow local
+
+Antes de conectar Laya ao fluxo editorial, prepare um JSONL local com casos
+rotulados e revisados por humanos. Cada linha deve conter:
+
+```json
+{"id":"case-001","state":{"text":"texto histórico"},"questions":{"topic":{"type":"choice","instructions":"Qual tema descreve `text`?","criteria":{"history":"história","other":"outro"}}},"expected":{"topic":"history"},"lang":"pt"}
+```
+
+`expected` deve usar o rótulo de `choice`, boolean para `noul` ou índice inteiro
+da escala ordenada de `score`. Execute:
+
+```powershell
+urdia-laya-shadow .\meus-casos-laya.jsonl --report .\artifacts\laya-shadow.json
+```
+
+O comando requer o extra `[laya]` e acesso ao Hugging Face na primeira
+execução. Ele não altera registros editoriais, não persiste os textos dos
+casos, não estima calibração nem estabelece um critério automático de
+promoção. O relatório contém hash SHA-256 do JSONL, versão do pacote, revisões
+dos checkpoints, contagens, acurácia por pergunta, erro absoluto médio de
+`score` e contagem de rotas. Guarde dataset e relatório somente em local
+aprovado para o nível de sensibilidade dos dados; o hash não anonimiza nem
+substitui controle de acesso ao dataset.
+
+Inclua casos representativos do perfil ANM, uma referência humana por decisão,
+casos ambíguos e exemplos de falsos positivos/negativos. Para escolhas
+`choice`, teste paráfrases e mudanças na ordem das opções; para português,
+registre idioma explicitamente (`lang: "pt"`). O benchmark publicado pelo
+projeto Laya não substitui essa avaliação própria.
+
 O adapter é inerte até ser injetado no `CapabilityCaller` **e** os registros
 de provider e capability serem ativados. A capability deve ser
 `laya.classify`; configure `allowed_profiles` explicitamente para os perfis
