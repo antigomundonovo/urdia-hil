@@ -53,6 +53,9 @@ def test_canonicalize_url_strips_tracking_and_fragment():
         == "https://site.test/P%C3%A1gina?a=2"
     )
     assert canonicalize_url("http://site.test:80/x") == "http://site.test/x"
+    assert canonicalize_url("https://site.test:80/x") == "https://site.test:80/x"
+    assert canonicalize_url("http://site.test:443/x") == "http://site.test:443/x"
+    assert canonicalize_url("https://[2001:db8::1]:443/x") == "https://[2001:db8::1]/x"
 
 
 def test_parse_feed_rss_and_atom():

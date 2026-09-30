@@ -45,7 +45,10 @@ def canonicalize_url(url: str) -> str:
     pairs.sort()
     query = urlencode(pairs)
     port = parsed.port
-    netloc = host if port in (None, 80, 443) else f"{host}:{port}"
+    if ":" in host:
+        host = f"[{host}]"
+    default_port = {"http": 80, "https": 443}.get(scheme)
+    netloc = host if port is None or port == default_port else f"{host}:{port}"
     return urlunparse((scheme, netloc, parsed.path or "/", "", query, ""))
 
 

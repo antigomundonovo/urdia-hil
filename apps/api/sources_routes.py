@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from packages.domain.enums import JobType
 from packages.domain.models import Profile
 from packages.domain.repositories import JobRepository, SourceRepository
+from packages.research.discovery import canonicalize_url
 from packages.shared.db import get_session
 
 router = APIRouter(prefix="/api/v1")
@@ -87,7 +88,7 @@ def create_source(
         publisher=body.publisher,
         language=body.language,
         jurisdiction=body.jurisdiction,
-        canonical_url=body.url,
+        canonical_url=canonicalize_url(body.url),
     )
     return _source_payload(source)
 
