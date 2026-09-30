@@ -84,19 +84,31 @@ class DiscoveryEngine:
             )
         )
 
-    def _existing_hashes(self, workspace_id) -> set[str]:
+    def _existing_hashes(self, workspace_id, profile_id) -> set[str]:
+        profile_scope = (
+            DiscoveryItem.profile_id.is_(None)
+            if profile_id is None
+            else DiscoveryItem.profile_id == profile_id
+        )
         rows = self.session.scalars(
             select(DiscoveryItem.content_hash).where(
                 DiscoveryItem.workspace_id == workspace_id,
+                profile_scope,
                 DiscoveryItem.content_hash.is_not(None),
             )
         )
         return set(rows)
 
-    def _existing_urls(self, workspace_id) -> set[str]:
+    def _existing_urls(self, workspace_id, profile_id) -> set[str]:
+        profile_scope = (
+            DiscoveryItem.profile_id.is_(None)
+            if profile_id is None
+            else DiscoveryItem.profile_id == profile_id
+        )
         rows = self.session.scalars(
             select(DiscoveryItem.url).where(
                 DiscoveryItem.workspace_id == workspace_id,
+                profile_scope,
                 DiscoveryItem.url.is_not(None),
             )
         )
@@ -171,8 +183,8 @@ class DiscoveryEngine:
 
         report.items_seen = len(items)
         retrieval.content_hash = content_hash_of(result)
-        seen_hashes = self._existing_hashes(source.workspace_id)
-        seen_urls = self._existing_urls(source.workspace_id)
+        seen_hashes = self._existing_hashes(source.workspace_id, source.profile_id)
+        seen_urls = self._existing_urls(source.workspace_id, source.profile_id)
 
         for item in items:
             canon = canonicalize_url(item.url)
@@ -215,6 +227,7 @@ class DiscoveryEngine:
             select(DiscoveryItem)
             .where(
                 DiscoveryItem.workspace_id == source.workspace_id,
+                DiscoveryItem.profile_id == source.profile_id,
                 DiscoveryItem.content_hash == chash,
             )
             .limit(1)
@@ -232,6 +245,7 @@ class DiscoveryEngine:
             select(DiscoveryItem)
             .where(
                 DiscoveryItem.workspace_id == source.workspace_id,
+                DiscoveryItem.profile_id == source.profile_id,
                 DiscoveryItem.content_hash == chash,
             )
             .limit(1)

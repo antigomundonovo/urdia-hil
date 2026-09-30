@@ -53,6 +53,8 @@ Preferir structured extraction/Trafilatura. Browser only quando JS/dynamic conte
 
 ## Deduplication
 Canonical URL + URL normalization + content hash + semantic similarity + source relations.
+Deduplication and clusters are scoped to the source profile; items from another
+profile in the same workspace must not suppress or merge private discoveries.
 
 ## Source dependency
 A cita B, B cita C, C reproduz D devem formar uma cadeia/cluster de dependência e não múltiplas confirmações independentes.

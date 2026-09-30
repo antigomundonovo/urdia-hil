@@ -414,6 +414,71 @@ def test_same_content_in_two_sources_clusters_not_duplicates(db, world):
     assert clusters[0].item_count == 2  # two source instances of one story
 
 
+def test_discovery_deduplication_does_not_cross_profile_boundaries(db, world):
+    ws, profile = world
+    other_profile = Profile(
+        workspace_id=ws.id,
+        key="another",
+        name="Another profile",
+    )
+    db.add(other_profile)
+    db.flush()
+    sources = [
+        Source(
+            workspace_id=ws.id,
+            profile_id=profile.id,
+            url="http://a.test/feed",
+            source_type="rss",
+        ),
+        Source(
+            workspace_id=ws.id,
+            profile_id=other_profile.id,
+            url="http://b.test/feed",
+            source_type="rss",
+        ),
+    ]
+    db.add_all(sources)
+    db.flush()
+
+    def feed_with(url: str) -> bytes:
+        return (
+            b'<?xml version="1.0"?><rss version="2.0"><channel><item>'
+            b"<title>Shared topic</title><link>"
+            + url.encode()
+            + b"</link><description>Identical summary.</description>"
+            b"</item></channel></rss>"
+        )
+
+    engine = DiscoveryEngine(
+        db,
+        _fetcher_for(
+            {
+                "http://a.test/feed": feed_with("http://a.test/story"),
+                "http://b.test/feed": feed_with("http://b.test/story"),
+            }
+        ),
+    )
+
+    assert engine.scan_source(sources[0]).items_new == 1
+    assert engine.scan_source(sources[1]).items_new == 1
+    items = list(
+        db.scalars(
+            select(DiscoveryItem)
+            .where(DiscoveryItem.workspace_id == ws.id)
+            .order_by(DiscoveryItem.profile_id)
+        )
+    )
+    clusters = list(
+        db.scalars(
+            select(DiscoveryCluster).where(DiscoveryCluster.workspace_id == ws.id)
+        )
+    )
+
+    assert {item.profile_id for item in items} == {profile.id, other_profile.id}
+    assert len(clusters) == 2
+    assert {cluster.item_count for cluster in clusters} == {1}
+
+
 def test_fetch_blocked_source_records_failure(db, world):
     ws, profile = world
     source = Source(
