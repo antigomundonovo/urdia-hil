@@ -576,6 +576,10 @@ _DECLARED_LATER = (
     "wikimedia",
 )
 
+SUPPORTED_SOURCE_TYPES = frozenset(
+    {"rss", "atom", "sitemap", "crossref", "openalex", "gdelt", "wikipedia", "wikidata"}
+)
+
 
 class NotImplementedAdapter:
     """Declared by Doc 09, implemented in later milestones — fails loudly."""

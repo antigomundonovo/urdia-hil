@@ -29,6 +29,8 @@ o SafeFetcher, com validação de redirect, tamanho, timeout, robots e limite po
 host.
 Retrievals bem-sucedidos persistem ETag e Last-Modified; varreduras seguintes
 enviam validadores condicionais e registram HTTP 304 sem reprocessar resultados.
+Tipos de fonte ainda sem adaptador podem ser cadastrados, mas a API rejeita a
+solicitação de varredura até que a implementação esteja disponível.
 
 ## Pipeline
 ```text

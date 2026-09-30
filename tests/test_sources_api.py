@@ -94,3 +94,22 @@ def test_retrieve_queues_job(client, db, world):
     job = client.get(f"/api/v1/jobs/{job_id}?workspace_id={ws.id}").json()
     assert job["job_type"] == "SOURCE_RETRIEVAL"
     assert job["payload"]["source_id"] == str(source.id)
+
+
+def test_retrieve_rejects_declared_but_unimplemented_adapter(client, db, world):
+    ws, profile = world
+    source = Source(
+        workspace_id=ws.id,
+        profile_id=profile.id,
+        url="https://archive.test/query",
+        source_type="internet_archive",
+    )
+    db.add(source)
+    db.flush()
+
+    response = client.post(
+        f"/api/v1/sources/{source.id}/retrieve?workspace_id={ws.id}"
+    )
+
+    assert response.status_code == 422
+    assert "not implemented" in response.json()["detail"]

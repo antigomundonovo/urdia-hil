@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 from packages.domain.enums import JobType
 from packages.domain.models import Profile
 from packages.domain.repositories import JobRepository, SourceRepository
+from packages.research.adapters import SUPPORTED_SOURCE_TYPES
 from packages.research.discovery import canonicalize_url
 from packages.shared.db import get_session
 
@@ -116,6 +117,11 @@ def retrieve_source(
         raise HTTPException(status_code=404, detail="source not found")
     if source.profile_id is None:
         raise HTTPException(status_code=422, detail="source has no profile scope")
+    if source.source_type not in SUPPORTED_SOURCE_TYPES:
+        raise HTTPException(
+            status_code=422,
+            detail=f"source adapter '{source.source_type}' is not implemented",
+        )
     job = JobRepository(session).create(
         workspace_id,
         source.profile_id,
