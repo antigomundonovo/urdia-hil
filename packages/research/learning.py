@@ -45,6 +45,7 @@ class LearningService:
     def _experiment_for_context(
         self, ctx: ExecutionContext, experiment: Experiment
     ) -> Experiment:
+        self._require_profile(ctx)
         scoped = self.session.scalars(
             select(Experiment).where(
                 Experiment.id == experiment.id,
@@ -57,6 +58,7 @@ class LearningService:
         return scoped
 
     def _rule_for_context(self, ctx: ExecutionContext, rule: Rule) -> Rule:
+        self._require_profile(ctx)
         scoped = self.session.scalars(
             select(Rule).where(
                 Rule.id == rule.id,
