@@ -426,13 +426,151 @@ class OpenAlexAdapter(_FetchingAdapter):
         return items
 
 
+class GdeltAdapter(_FetchingAdapter):
+    source_type = "gdelt"
+
+    def fetch_items(
+        self,
+        source_url: str,
+        fetcher: SafeFetcher | None = None,
+        *,
+        etag: str | None = None,
+        last_modified: str | None = None,
+    ) -> list[RawItem]:
+        result = self._fetch(
+            source_url, fetcher, etag=etag, last_modified=last_modified
+        )
+        if result.status_code == 304:
+            return []
+        payload = _parse_json_result(result, self.source_type)
+        records = payload.get("articles")
+        if not isinstance(records, list):
+            raise AdapterError("GDELT response is missing articles")
+        items: list[RawItem] = []
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            url = record.get("url")
+            if not isinstance(url, str) or not _is_http_url(url):
+                continue
+            items.append(
+                RawItem(
+                    url=url,
+                    title=record.get("title") if isinstance(record.get("title"), str) else None,
+                    published_at=(
+                        record.get("seendate")
+                        if isinstance(record.get("seendate"), str)
+                        else None
+                    ),
+                    raw={
+                        "source": self.source_type,
+                        "domain": record.get("domain"),
+                        "language": record.get("language"),
+                        "source_country": record.get("sourcecountry"),
+                    },
+                )
+            )
+        return items
+
+
+class WikipediaAdapter(_FetchingAdapter):
+    source_type = "wikipedia"
+
+    def fetch_items(
+        self,
+        source_url: str,
+        fetcher: SafeFetcher | None = None,
+        *,
+        etag: str | None = None,
+        last_modified: str | None = None,
+    ) -> list[RawItem]:
+        result = self._fetch(
+            source_url, fetcher, etag=etag, last_modified=last_modified
+        )
+        if result.status_code == 304:
+            return []
+        payload = _parse_json_result(result, self.source_type)
+        query = payload.get("query")
+        pages = query.get("pages") if isinstance(query, dict) else None
+        if isinstance(pages, dict):
+            records = list(pages.values())
+        elif isinstance(pages, list):
+            records = pages
+        else:
+            raise AdapterError("Wikipedia response is missing query.pages")
+        items: list[RawItem] = []
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            url = record.get("fullurl")
+            if not isinstance(url, str) or not _is_http_url(url):
+                continue
+            items.append(
+                RawItem(
+                    url=url,
+                    title=record.get("title") if isinstance(record.get("title"), str) else None,
+                    summary=(
+                        record.get("extract")
+                        if isinstance(record.get("extract"), str)
+                        else None
+                    ),
+                    published_at=(
+                        record.get("timestamp")
+                        if isinstance(record.get("timestamp"), str)
+                        else None
+                    ),
+                    raw={"source": self.source_type, "page_id": record.get("pageid")},
+                )
+            )
+        return items
+
+
+class WikidataAdapter(_FetchingAdapter):
+    source_type = "wikidata"
+
+    def fetch_items(
+        self,
+        source_url: str,
+        fetcher: SafeFetcher | None = None,
+        *,
+        etag: str | None = None,
+        last_modified: str | None = None,
+    ) -> list[RawItem]:
+        result = self._fetch(
+            source_url, fetcher, etag=etag, last_modified=last_modified
+        )
+        if result.status_code == 304:
+            return []
+        payload = _parse_json_result(result, self.source_type)
+        records = payload.get("search")
+        if not isinstance(records, list):
+            raise AdapterError("Wikidata response is missing search results")
+        items: list[RawItem] = []
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            entity_id = record.get("id")
+            if not isinstance(entity_id, str) or not re.fullmatch(r"Q[1-9]\d*", entity_id):
+                continue
+            items.append(
+                RawItem(
+                    url=f"https://www.wikidata.org/wiki/{entity_id}",
+                    title=record.get("label") if isinstance(record.get("label"), str) else None,
+                    summary=(
+                        record.get("description")
+                        if isinstance(record.get("description"), str)
+                        else None
+                    ),
+                    raw={"source": self.source_type, "entity_id": entity_id},
+                )
+            )
+        return items
+
+
 # --- declared-but-not-yet-implemented adapters ---------------------------
 
 _DECLARED_LATER = (
     "search",
-    "gdelt",
-    "wikidata",
-    "wikipedia",
     "wayback",
     "internet_archive",
     "wikimedia",
@@ -468,6 +606,12 @@ def get_adapter(source_type: str, fetcher: SafeFetcher) -> SourceAdapter:
         return CrossrefAdapter(fetcher)
     if source_type == "openalex":
         return OpenAlexAdapter(fetcher)
+    if source_type == "gdelt":
+        return GdeltAdapter(fetcher)
+    if source_type == "wikipedia":
+        return WikipediaAdapter(fetcher)
+    if source_type == "wikidata":
+        return WikidataAdapter(fetcher)
     if source_type in _DECLARED_LATER:
         return NotImplementedAdapter(source_type)
     raise AdapterError(f"unknown source_type: {source_type}")

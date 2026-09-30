@@ -72,7 +72,7 @@ def test_parse_feed_rss_and_atom():
 def test_unknown_and_unimplemented_adapters_fail_loudly():
     with pytest.raises(AdapterError):
         get_adapter("facebook", None)  # not in Doc 09 list
-    adapter = get_adapter("wikidata", None)  # declared, not implemented yet
+    adapter = get_adapter("internet_archive", None)  # declared, not implemented yet
     with pytest.raises(AdapterError, match="not implemented"):
         adapter.fetch_items("http://x.test", None)
 
@@ -232,6 +232,72 @@ def test_adapters_fail_loudly_on_http_errors():
         RssAdapter(fetcher).fetch_items("http://public.test/missing")
     with pytest.raises(AdapterError, match="HTTP 404"):
         CrossrefAdapter(fetcher).fetch_items("http://public.test/missing")
+
+
+def test_gdelt_wikipedia_and_wikidata_normalize_search_results():
+    from packages.research.adapters import GdeltAdapter, WikidataAdapter, WikipediaAdapter
+
+    gdelt_url = "http://public.test/gdelt"
+    wikipedia_url = "http://public.test/wikipedia"
+    wikidata_url = "http://public.test/wikidata"
+    fetcher = _fetcher_for(
+        {
+            gdelt_url: json.dumps(
+                {
+                    "articles": [
+                        {
+                            "url": "https://news.test/history",
+                            "title": "Arquivo histórico localizado",
+                            "seendate": "20260930120000",
+                            "domain": "news.test",
+                            "language": "Portuguese",
+                            "sourcecountry": "Brazil",
+                        },
+                        {"url": "file:///private/item", "title": "Reject"},
+                    ]
+                }
+            ).encode(),
+            wikipedia_url: json.dumps(
+                {
+                    "query": {
+                        "pages": [
+                            {
+                                "pageid": 42,
+                                "title": "História urbana",
+                                "fullurl": "https://pt.wikipedia.org/wiki/Hist%C3%B3ria",
+                                "extract": "Resumo enciclopédico.",
+                                "timestamp": "2026-09-30T12:00:00Z",
+                            }
+                        ]
+                    }
+                }
+            ).encode(),
+            wikidata_url: json.dumps(
+                {
+                    "search": [
+                        {
+                            "id": "Q42",
+                            "label": "Documento histórico",
+                            "description": "objeto arquivístico",
+                        },
+                        {"id": "not-an-entity", "label": "Reject"},
+                    ]
+                }
+            ).encode(),
+        }
+    )
+
+    gdelt = GdeltAdapter(fetcher).fetch_items(gdelt_url)
+    wikipedia = WikipediaAdapter(fetcher).fetch_items(wikipedia_url)
+    wikidata = WikidataAdapter(fetcher).fetch_items(wikidata_url)
+
+    assert len(gdelt) == 1
+    assert gdelt[0].title == "Arquivo histórico localizado"
+    assert gdelt[0].raw["source_country"] == "Brazil"
+    assert wikipedia[0].summary == "Resumo enciclopédico."
+    assert wikipedia[0].raw["page_id"] == 42
+    assert wikidata[0].url == "https://www.wikidata.org/wiki/Q42"
+    assert wikidata[0].summary == "objeto arquivístico"
 
 
 @pytest.fixture()
