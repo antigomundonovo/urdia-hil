@@ -20,12 +20,14 @@ from packages.domain.editorial import (
     OpportunitySource,
 )
 from packages.domain.enums import (
+    MAIN_CHAIN_STATES,
     JEVDecision,
     OpportunityState,
     RightsGateOutcome,
     UncertaintyState,
 )
 from packages.domain.knowledge import Claim
+from packages.domain.state_machine import TransitionError
 from packages.governance.audit import append_audit
 from packages.governance.transition_service import TransitionService
 from packages.research.rights import RightsService
@@ -151,6 +153,30 @@ class OpportunityService:
         )
         opp.state = target.value
         self.session.flush()
+        return opp
+
+    def advance_to(
+        self,
+        ctx: ExecutionContext,
+        opp: Opportunity,
+        target: OpportunityState,
+        *,
+        reason: str | None = None,
+    ):
+        """Walk the linear main chain forward to `target`, one audited step at
+        a time — no skipping (Doc 03). Raises if a non-linear move is needed
+        (e.g., leaving an auxiliary state)."""
+        current = OpportunityState(opp.state)
+        chain = list(MAIN_CHAIN_STATES)
+        if current not in chain or target not in chain:
+            raise TransitionError(
+                f"advance_to works on the main chain only: {current} → {target}"
+            )
+        ci, ti = chain.index(current), chain.index(target)
+        if ti <= ci:
+            raise TransitionError(f"target is not ahead: {current} → {target}")
+        for state in chain[ci + 1 : ti + 1]:
+            self.transition(ctx, opp, state, reason=reason)
         return opp
 
     # --- JEV (deterministic layer) ------------------------------------------

@@ -1,0 +1,435 @@
+"""Content production, QC, human review, publisher gate, export
+(Doc 17 steps 23-26; Docs 00 §21-22, 02, 03, 13, 16).
+
+QC is deterministic (Doc 17 §10): every gate computed from the package's own
+data; no "ignore gate" exists (Doc 06). The publisher gate (Doc 00 §22) only
+accepts READY + APPROVED + RIGHTS_VERIFIED + PLATFORM_ALLOWED — a publication
+record cannot even be created otherwise (fail closed).
+
+Export (Doc 13): post-YYYY-MM-DD-ID folder with image/, captions/, sources/,
+rights/, platform_variants/, manifest.json. Manifest records versions for
+determinism.
+"""
+
+import json
+from datetime import UTC, datetime
+from pathlib import Path
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from packages.domain.assets import RightsRecord
+from packages.domain.editorial import (
+    CanonicalContent,
+    ContentPackage,
+    Draft,
+    Opportunity,
+    PlatformVariant,
+)
+from packages.domain.enums import (
+    ContentFormat,
+    GateResult,
+    OpportunityState,
+    QualityGate,
+    RightsClassification,
+    RightsGateOutcome,
+    UncertaintyState,
+)
+from packages.domain.knowledge import Claim, EvidenceRecord
+from packages.governance.audit import append_audit
+from packages.research.opportunity import OpportunityService
+from packages.research.rights import rights_gate
+from packages.shared.execution_context import ExecutionContext
+
+
+class PublicationBlocked(Exception):
+    """Fail closed: the publisher gate refused the package."""
+
+
+class ContentService:
+    def __init__(self, session: Session, export_root: Path | None = None) -> None:
+        self.session = session
+        self.opps = OpportunityService(session)
+        self.export_root = Path(export_root) if export_root else None
+
+    # --- canonical → package → draft ---------------------------------------
+
+    def create_content(
+        self,
+        ctx: ExecutionContext,
+        opp: Opportunity,
+        *,
+        format: ContentFormat,
+        **canonical_fields,
+    ) -> ContentPackage:
+        canonical = CanonicalContent(
+            workspace_id=ctx.workspace_id,
+            opportunity_id=opp.id,
+            **canonical_fields,
+        )
+        self.session.add(canonical)
+        self.session.flush()
+        package = ContentPackage(
+            workspace_id=ctx.workspace_id,
+            opportunity_id=opp.id,
+            canonical_content_id=canonical.id,
+            format=format.value,
+        )
+        self.session.add(package)
+        self.session.flush()
+        self.opps.advance_to(
+            ctx, opp, OpportunityState.FORMAT_SELECTED, reason=f"format {format.value}"
+        )
+        return package
+
+    def generate_draft(
+        self,
+        ctx: ExecutionContext,
+        package: ContentPackage,
+        *,
+        title: str,
+        caption: str,
+        claim_ids_used: list | None = None,
+        payload: dict | None = None,
+    ) -> Draft:
+        draft = Draft(
+            workspace_id=ctx.workspace_id,
+            content_package_id=package.id,
+            title=title,
+            caption=caption,
+            payload=payload or {},
+            claim_ids_used=claim_ids_used or [],
+        )
+        self.session.add(draft)
+        self.session.flush()
+        opp = self.session.get(Opportunity, package.opportunity_id)
+        pre_draft = (
+            OpportunityState.FORMAT_SELECTED.value,
+            OpportunityState.PLATFORM_SELECTED.value,
+        )
+        if opp.state in pre_draft:
+            self.opps.advance_to(
+                ctx, opp, OpportunityState.DRAFTING, reason="draft generated"
+            )
+        append_audit(
+            self.session,
+            ctx=ctx,
+            action="DRAFT_GENERATED",
+            entity_type="content_package",
+            entity_id=package.id,
+            new_state="DRAFT",
+        )
+        return draft
+
+    # --- QC (Doc 00 §21, Doc 02/03 gate lists) -------------------------------
+
+    def run_qc(self, ctx: ExecutionContext, package: ContentPackage) -> dict:
+        gates: dict[str, str] = {}
+        blocking: list[str] = []
+        warnings: list[str] = []
+        opp = self.session.get(Opportunity, package.opportunity_id)
+        canonical = self.session.get(CanonicalContent, package.canonical_content_id)
+        draft = self.session.scalars(
+            select(Draft).where(Draft.content_package_id == package.id).limit(1)
+        ).first()
+
+        def _set(gate: QualityGate, result: GateResult, note: str | None = None):
+            gates[gate.value.lower().replace("-", "_")] = result.value
+            if result is GateResult.FAIL and note:
+                blocking.append(f"{gate.value}: {note}")
+            if result is GateResult.WARNING and note:
+                warnings.append(f"{gate.value}: {note}")
+
+        # EVIDENCE + FACTUALITY + UNCERTAINTY — from the claims actually used
+        claim_ids = list(draft.claim_ids_used or []) if draft else []
+        claims = (
+            list(self.session.scalars(select(Claim).where(Claim.id.in_(claim_ids))))
+            if claim_ids
+            else []
+        )
+        if not claim_ids:
+            _set(QualityGate.EVIDENCE, GateResult.FAIL, "no claims referenced")
+        else:
+            missing = []
+            controversial = []
+            for claim in claims:
+                records = list(
+                    self.session.scalars(
+                        select(EvidenceRecord).where(
+                            EvidenceRecord.claim_id == claim.id,
+                            EvidenceRecord.supports.is_(True),
+                        )
+                    )
+                )
+                status = claim.status.value if hasattr(claim.status, "value") else str(claim.status)
+                if not records:
+                    missing.append(str(claim.id))
+                if status == UncertaintyState.CONTROVERSIAL.value:
+                    controversial.append(str(claim.id))
+            if missing:
+                _set(
+                    QualityGate.EVIDENCE,
+                    GateResult.FAIL,
+                    f"{len(missing)} claim(s) without supporting evidence",
+                )
+            else:
+                _set(QualityGate.EVIDENCE, GateResult.PASS)
+            _set(QualityGate.FACTUALITY, GateResult.PASS if not missing else GateResult.FAIL)
+            _set(
+                QualityGate.UNCERTAINTY,
+                GateResult.WARNING if controversial else GateResult.PASS,
+                (
+                    f"{len(controversial)} controversial claim(s): show uncertainty"
+                    if controversial
+                    else None
+                ),
+            )
+
+        # RIGHTS — every asset of the opportunity through the gate
+        from packages.domain.editorial import OpportunityAsset
+
+        asset_ids = list(
+            self.session.scalars(
+                select(OpportunityAsset.ref_id).where(OpportunityAsset.opportunity_id == opp.id)
+            )
+        )
+        rights_ok = True
+        for aid in asset_ids:
+            record = self.session.scalars(
+                select(RightsRecord)
+                .where(RightsRecord.asset_id == aid)
+                .order_by(RightsRecord.created_at.desc())
+                .limit(1)
+            ).first()
+            if record is None or record.status != "VERIFIED" or rights_gate(
+                RightsClassification(record.classification)
+            ) is not RightsGateOutcome.MAY_PROCEED:
+                rights_ok = False
+        if asset_ids and rights_ok:
+            _set(QualityGate.RIGHTS, GateResult.PASS)
+        else:
+            _set(
+                QualityGate.RIGHTS,
+                GateResult.FAIL,
+                "asset without verified rights" if asset_ids else "no assets attached",
+            )
+
+        # VISUAL — assets exist
+        _set(
+            QualityGate.VISUAL,
+            GateResult.PASS if asset_ids else GateResult.FAIL,
+            "no assets attached",
+        )
+
+        # ORIGINALITY — analyzer milestone pending; WARNING so it never
+        # silently passes (afirme pouco)
+        _set(
+            QualityGate.ORIGINALITY,
+            GateResult.WARNING,
+            "originality analyzer not yet implemented",
+        )
+
+        # SEO — canonical has entities
+        seo_entities = (canonical.seo_entities or []) if canonical else []
+        _set(
+            QualityGate.SEO,
+            GateResult.PASS if seo_entities else GateResult.WARNING,
+            "no SEO entities",
+        )
+
+        # PLATFORM — platform plans exist for the opportunity
+        from packages.domain.editorial import PlatformPlan
+
+        platforms = list(
+            self.session.scalars(
+                select(PlatformPlan).where(PlatformPlan.opportunity_id == opp.id)
+            )
+        )
+        _set(
+            QualityGate.PLATFORM,
+            GateResult.PASS if platforms else GateResult.WARNING,
+            "no platform plans recorded",
+        )
+
+        # RELEVANCE + ANTI-SLOP — placeholders that never auto-pass
+        _set(
+            QualityGate.RELEVANCE,
+            GateResult.PASS if opp.why_profile else GateResult.WARNING,
+            "why_profile empty",
+        )
+        _set(QualityGate.ANTI_SLOP, GateResult.WARNING, "anti-slop analyzer not yet implemented")
+
+        # HUMAN_REVIEW — always REQUIRED in V1 (Doc 00 §22)
+        gates["human_review"] = GateResult.REQUIRED.value
+
+        if blocking:
+            overall = GateResult.FAIL
+        elif warnings:
+            overall = GateResult.WARNING
+        else:
+            overall = GateResult.PASS
+        result = {
+            "status": overall.value,
+            "gates": gates,
+            "blocking_issues": blocking,
+            "warnings": warnings,
+        }
+        append_audit(
+            self.session,
+            ctx=ctx,
+            action="QC_RUN",
+            entity_type="content_package",
+            entity_id=package.id,
+            new_state=overall.value,
+            metadata={"gates": gates},
+        )
+        if opp.state == OpportunityState.DRAFTING.value and overall is not GateResult.FAIL:
+            self.opps.advance_to(ctx, opp, OpportunityState.QUALITY_CONTROL, reason="QC")
+        return result
+
+    # --- human review (Doc 06 actions) ---------------------------------------
+
+    def approve(self, ctx: ExecutionContext, opp: Opportunity, approved_by=None) -> Opportunity:
+        """APPROVE: human authority (Doc 05/06). Moves QUALITY_CONTROL →
+        HUMAN_REVIEW → READY. Approval is audited with the actor."""
+        current = OpportunityState(opp.state)
+        if current is OpportunityState.QUALITY_CONTROL:
+            self.opps.transition(
+                ctx, opp, OpportunityState.HUMAN_REVIEW, reason="human review entered"
+            )
+        self.opps.transition(
+            ctx, opp, OpportunityState.READY, reason="approved by human review"
+        )
+        append_audit(
+            self.session,
+            ctx=ctx,
+            action="HUMAN_APPROVED",
+            entity_type="opportunity",
+            entity_id=opp.id,
+            new_state=OpportunityState.READY.value,
+            reason=f"approved_by={approved_by}" if approved_by else "approved",
+        )
+        return opp
+
+    def reject(self, ctx: ExecutionContext, opp: Opportunity, reason: str) -> Opportunity:
+        self.opps.transition(ctx, opp, OpportunityState.REJECTED, reason=reason)
+        append_audit(
+            self.session,
+            ctx=ctx,
+            action="HUMAN_REJECTED",
+            entity_type="opportunity",
+            entity_id=opp.id,
+            new_state=OpportunityState.REJECTED.value,
+            reason=reason,
+        )
+        return opp
+
+    # --- publisher gate (Doc 00 §22) ------------------------------------------
+
+    def publisher_gate(self, ctx: ExecutionContext, package: ContentPackage, platform: str) -> dict:
+        """READY + APPROVED + RIGHTS_VERIFIED + PLATFORM_ALLOWED or nothing."""
+        opp = self.session.get(Opportunity, package.opportunity_id)
+        checks = {"READY": opp.state == OpportunityState.READY.value}
+
+        from packages.domain.repositories import AuditRepository
+
+        audit = AuditRepository(self.session).list_for_workspace(ctx.workspace_id, limit=500)
+        checks["APPROVED"] = any(
+            e.action == "HUMAN_APPROVED" and str(e.entity_id) == str(opp.id)
+            for e in audit
+        )
+
+        # RIGHTS_VERIFIED for every asset
+        from packages.domain.editorial import OpportunityAsset
+
+        asset_ids = list(
+            self.session.scalars(
+                select(OpportunityAsset.ref_id).where(OpportunityAsset.opportunity_id == opp.id)
+            )
+        )
+        def _asset_verified(aid) -> bool:
+            record = self.session.scalars(
+                select(RightsRecord)
+                .where(RightsRecord.asset_id == aid)
+                .order_by(RightsRecord.created_at.desc())
+                .limit(1)
+            ).first()
+            if record is None or record.status != "VERIFIED":
+                return False
+            return (
+                rights_gate(RightsClassification(record.classification))
+                is RightsGateOutcome.MAY_PROCEED
+            )
+
+        checks["RIGHTS_VERIFIED"] = bool(asset_ids) and all(
+            _asset_verified(aid) for aid in asset_ids
+        )
+
+        # PLATFORM_ALLOWED — a platform plan exists for this platform
+        from packages.domain.editorial import PlatformPlan
+
+        plan = self.session.scalars(
+            select(PlatformPlan).where(
+                PlatformPlan.opportunity_id == opp.id, PlatformPlan.platform == platform
+            )
+        ).first()
+        checks["PLATFORM_ALLOWED"] = plan is not None
+
+        if not all(checks.values()):
+            raise PublicationBlocked(
+                f"publisher gate refused: {[k for k, v in checks.items() if not v]}"
+            )
+        return checks
+
+    # --- export (Doc 13) -------------------------------------------------------
+
+    def export_package(self, ctx: ExecutionContext, package: ContentPackage, platform: str) -> Path:
+        self.publisher_gate(ctx, package, platform)  # fails closed
+        if self.export_root is None:
+            raise PublicationBlocked("export root not configured")
+        opp = self.session.get(Opportunity, package.opportunity_id)
+        date_part = datetime.now(UTC).strftime("%Y-%m-%d")
+        short_id = str(package.id)[:8]
+        export_dir = self.export_root / f"post-{date_part}-{short_id}"
+        for sub in ("image", "captions", "sources", "rights", "platform_variants"):
+            (export_dir / sub).mkdir(parents=True, exist_ok=True)
+
+        draft = self.session.scalars(
+            select(Draft).where(Draft.content_package_id == package.id).limit(1)
+        ).first()
+        if draft:
+            (export_dir / "captions" / "caption.txt").write_text(
+                f"{draft.title or ''}\n\n{draft.caption or ''}", encoding="utf-8"
+            )
+
+        variant = PlatformVariant(
+            workspace_id=ctx.workspace_id,
+            content_package_id=package.id,
+            platform=platform,
+            payload={"exported_from": "V1 manual export"},
+        )
+        self.session.add(variant)
+        manifest = {
+            "package_id": str(package.id),
+            "opportunity_id": str(opp.id),
+            "opportunity_title": opp.title,
+            "format": package.format,
+            "platform": platform,
+            "exported_at": datetime.now(UTC).isoformat(),
+            "export_version": 1,
+            "rules": {"rights": "rights-1.0", "verification": "verification-1.0"},
+            "human_approved": True,
+        }
+        (export_dir / "manifest.json").write_text(
+            json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+        append_audit(
+            self.session,
+            ctx=ctx,
+            action="PACKAGE_EXPORTED",
+            entity_type="content_package",
+            entity_id=package.id,
+            new_state="EXPORTED",
+            metadata={"platform": platform, "path": str(export_dir)},
+        )
+        return export_dir
