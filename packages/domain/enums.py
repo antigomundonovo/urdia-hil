@@ -268,6 +268,36 @@ class QuarantineState(StrEnum):
     REJECTED = "REJECTED"
 
 
+class MetricName(StrEnum):
+    """Normalized metrics (Doc 15)."""
+
+    REACH = "REACH"
+    IMPRESSIONS = "IMPRESSIONS"
+    VIEWS = "VIEWS"
+    SAVES = "SAVES"
+    SHARES = "SHARES"
+    COMMENTS = "COMMENTS"
+    CLICKS = "CLICKS"
+    FOLLOWERS_GAINED = "FOLLOWERS_GAINED"
+    RETENTION = "RETENTION"
+    REPLAYS = "REPLAYS"
+    RESPONSES = "RESPONSES"
+    PARTICIPATION = "PARTICIPATION"
+    CONVERSION = "CONVERSION"
+
+
+class QualifiedSignal(StrEnum):
+    """Qualified learning signals (Doc 15)."""
+
+    SOURCE_REQUEST = "SOURCE_REQUEST"
+    CORRECTION = "CORRECTION"
+    DOCUMENT_SUBMISSION = "DOCUMENT_SUBMISSION"
+    TESTIMONY = "TESTIMONY"
+    RECURRING_QUESTION = "RECURRING_QUESTION"
+    CONTINUATION_REQUEST = "CONTINUATION_REQUEST"
+    AUDIENCE_DISCOVERY = "AUDIENCE_DISCOVERY"
+
+
 def rights_gate(classification: RightsClassification) -> RightsGateOutcome:
     """Deterministic rights gate (Doc 11). Fail closed: anything not explicitly
     VERIFIED-equivalent blocks. UNKNOWN = NÃO PUBLICAR (Doc 00 §15)."""

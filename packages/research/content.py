@@ -423,6 +423,29 @@ class ContentService:
         (export_dir / "manifest.json").write_text(
             json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8"
         )
+        # publication record (Doc 04): manual export is the V1 publication
+        # method (Doc 14); idempotency key per Doc 14 — profile+content+platform
+        from packages.domain.publishing import Publication
+
+        existing = self.session.scalars(
+            select(Publication).where(
+                Publication.content_package_id == package.id,
+                Publication.platform == platform,
+            )
+        ).first()
+        if existing is None:
+            publication = Publication(
+                workspace_id=ctx.workspace_id,
+                profile_id=opp.profile_id,
+                content_package_id=package.id,
+                platform=platform,
+                method="EXPORT",
+                status="PENDING",
+                idempotency_key=f"{opp.profile_id}:{package.id}:{platform}:v1",
+                approved_by=ctx.actor_id,
+            )
+            self.session.add(publication)
+        self.session.flush()
         append_audit(
             self.session,
             ctx=ctx,

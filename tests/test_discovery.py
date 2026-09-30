@@ -106,8 +106,10 @@ def test_scan_creates_items_dedups_and_clusters(db, world):
     assert report2.items_new == 0
     assert report2.duplicates == 2
 
-    # observability rows (Doc 09) — two retrievals, append-only history
-    retrievals = list(db.scalars(select(Retrieval)).all())
+    # observability rows (Doc 09) — two retrievals for this workspace
+    retrievals = list(
+        db.scalars(select(Retrieval).where(Retrieval.workspace_id == ws.id))
+    )
     assert len(retrievals) == 2
 
 
@@ -143,8 +145,12 @@ def test_same_content_in_two_sources_clusters_not_duplicates(db, world):
     engine.scan_source(s1)
     engine.scan_source(s2)
 
-    clusters = list(db.scalars(select(DiscoveryCluster)).all())
-    items = list(db.scalars(select(DiscoveryItem)).all())
+    clusters = list(
+        db.scalars(select(DiscoveryCluster).where(DiscoveryCluster.workspace_id == ws.id))
+    )
+    items = list(
+        db.scalars(select(DiscoveryItem).where(DiscoveryItem.workspace_id == ws.id))
+    )
     assert len(clusters) == 1  # one story, not two
     assert len(items) == 1  # the copy is a dependency, not a new item
     assert clusters[0].item_count == 2  # two source instances of one story
