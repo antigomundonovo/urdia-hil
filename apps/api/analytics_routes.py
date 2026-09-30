@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from packages.domain.models import Profile
 from packages.domain.publishing import Publication
 from packages.research.analytics import AnalyticsService
 from packages.research.learning import LearningError, LearningService
@@ -22,6 +23,17 @@ from packages.research.opportunity import OpportunityService
 from packages.shared.db import get_session
 
 router = APIRouter(prefix="/api/v1")
+
+
+def _profile_scoped(session: Session, workspace_id: UUID, profile_id: UUID) -> None:
+    profile = session.scalars(
+        select(Profile.id).where(
+            Profile.id == profile_id,
+            Profile.workspace_id == workspace_id,
+        )
+    ).first()
+    if profile is None:
+        raise HTTPException(status_code=404, detail="profile not found in workspace")
 
 
 def _publication_scoped(session: Session, publication_id: UUID, workspace_id: UUID) -> Publication:
@@ -46,6 +58,8 @@ def list_publications(
     profile_id: UUID | None = Query(None),
     session: Session = Depends(get_session),
 ):
+    if profile_id is not None:
+        _profile_scoped(session, workspace_id, profile_id)
     stmt = select(Publication).where(Publication.workspace_id == workspace_id)
     if profile_id is not None:
         stmt = stmt.where(Publication.profile_id == profile_id)
@@ -119,6 +133,7 @@ def analytics_overview(
     profile_id: UUID = Query(...),
     session: Session = Depends(get_session),
 ):
+    _profile_scoped(session, workspace_id, profile_id)
     return AnalyticsService(session).overview(workspace_id, profile_id)
 
 
@@ -129,7 +144,9 @@ def analytics_publication(
     session: Session = Depends(get_session),
 ):
     pub = _publication_scoped(session, publication_id, workspace_id)
-    return AnalyticsService(session).publication_snapshot(pub)
+    return AnalyticsService(session).publication_snapshot(
+        _ctx_for(session, workspace_id, pub.profile_id), pub
+    )
 
 
 class MetricsBody(BaseModel):
@@ -146,6 +163,8 @@ def collect_metrics(
 ):
     """Append-only collection point (Doc 15): each call creates new events."""
     pub = _publication_scoped(session, publication_id, workspace_id)
+    if body.profile_id != pub.profile_id:
+        raise HTTPException(status_code=404, detail="publication not found")
     count = AnalyticsService(session).record_metrics(
         _ctx_for(session, workspace_id, pub.profile_id), pub, body.values
     )
@@ -164,6 +183,7 @@ def analytics_comments(
     limit: int = Query(100, ge=1, le=500),
     session: Session = Depends(get_session),
 ):
+    _profile_scoped(session, workspace_id, profile_id)
     rows = AnalyticsService(session).list_comments(workspace_id, profile_id, limit)
     return {
         "comments": [
@@ -184,6 +204,7 @@ def analytics_qualified_signals(
     profile_id: UUID = Query(...),
     session: Session = Depends(get_session),
 ):
+    _profile_scoped(session, workspace_id, profile_id)
     rows = AnalyticsService(session).qualified_signals(workspace_id, profile_id)
     return {
         "signals": [
@@ -207,6 +228,7 @@ def learning_state(
     profile_id: UUID = Query(...),
     session: Session = Depends(get_session),
 ):
+    _profile_scoped(session, workspace_id, profile_id)
     return LearningService(session).list_state(workspace_id, profile_id)
 
 
@@ -222,6 +244,7 @@ def create_experiment(
     profile_id: UUID = Query(...),
     session: Session = Depends(get_session),
 ):
+    _profile_scoped(session, workspace_id, profile_id)
     try:
         experiment = LearningService(session).create_experiment(
             _ctx_for(session, workspace_id, profile_id),
@@ -245,6 +268,7 @@ def propose_rule(
     profile_id: UUID = Query(...),
     session: Session = Depends(get_session),
 ):
+    _profile_scoped(session, workspace_id, profile_id)
     rule = LearningService(session).propose_rule(
         _ctx_for(session, workspace_id, profile_id),
         statement=body.statement,
@@ -266,17 +290,22 @@ def review_rule(
     profile_id: UUID = Query(...),
     session: Session = Depends(get_session),
 ):
+    _profile_scoped(session, workspace_id, profile_id)
     from packages.domain.publishing import Rule
 
     rule = session.get(Rule, rule_id)
     if rule is None or rule.workspace_id != workspace_id:
         raise HTTPException(status_code=404, detail="rule not found")
-    reviewed = LearningService(session).review_rule(
-        _ctx_for(session, workspace_id, profile_id),
-        rule,
-        reviewed_by=body.reviewed_by,
-        notes=body.notes,
-    )
+    try:
+        reviewed = LearningService(session).review_rule(
+            _ctx_for(session, workspace_id, profile_id),
+            rule,
+            reviewed_by=body.reviewed_by,
+            notes=body.notes,
+        )
+    except LearningError as err:
+        status_code = 404 if "not found" in str(err) else 409
+        raise HTTPException(status_code=status_code, detail=str(err)) from err
     return {"rule_id": str(reviewed.id), "status": reviewed.status}
 
 
@@ -287,6 +316,7 @@ def activate_rule(
     profile_id: UUID = Query(...),
     session: Session = Depends(get_session),
 ):
+    _profile_scoped(session, workspace_id, profile_id)
     from packages.domain.publishing import Rule
 
     rule = session.get(Rule, rule_id)
