@@ -43,6 +43,25 @@ exports
 Docker image
 ```
 
+## URDIA logout and connected integrations
+Ao sair da URDIA:
+- invalidar a sessão URDIA no servidor e limpar cookies/tokens locais;
+- revogar, quando suportado pelo provider, todos os tokens OAuth e credenciais
+  de integração vinculados ao usuário que encerrou a sessão;
+- remover segredos da disponibilidade operacional da URDIA e marcar essas
+  integrações como desconectadas, exigindo nova conexão após login;
+- impedir novas chamadas e impedir jobs pendentes/de recuperação de reutilizar
+  credenciais desconectadas; preservar checkpoints e histórico dos jobs;
+- auditar a ação sem incluir tokens ou outros segredos.
+
+Logout da URDIA não encerra a sessão global do usuário nos sites ou aplicativos
+dos providers. Revogar uma autorização OAuth e apagar credenciais locais encerra
+o acesso da URDIA; o encerramento da sessão própria do provider só pode ser
+prometido quando a API oficial daquele provider oferecer esse recurso.
+
+O logout afeta integrações pertencentes ao usuário que saiu, não as integrações
+de outros membros do workspace. Essa regra foi aprovada no AMENDMENT-2026-09-30-008.
+
 ## SSRF
 Para fetcher externo:
 - aceitar somente http/https;
