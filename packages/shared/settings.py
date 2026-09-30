@@ -5,6 +5,7 @@ or frontend (Doc 08).
 """
 
 from functools import lru_cache
+from urllib.parse import urlsplit, urlunsplit
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -53,6 +54,19 @@ class Settings(BaseSettings):
             f"postgresql+psycopg://{self.postgres_user}:{self.postgres_password}"
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
         )
+
+    @property
+    def redacted_database_url(self) -> str:
+        """Mask credentials before printing or logging runtime connection details."""
+        parsed = urlsplit(self.effective_database_url)
+        if not parsed.hostname or not parsed.password:
+            return self.effective_database_url
+
+        username = parsed.username or ""
+        netloc = f"{username}:***@{parsed.hostname}"
+        if parsed.port is not None:
+            netloc = f"{netloc}:{parsed.port}"
+        return urlunsplit((parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment))
 
 
 @lru_cache

@@ -85,6 +85,7 @@ Pré-requisitos: Git, Docker Desktop, Python, Node.js, FFmpeg.
 
 ```bash
 cp .env.example .env        # definir POSTGRES_PASSWORD e demais variáveis
+python -m scripts.doctor    # valida app env + conexão com o Postgres
 docker compose up -d postgres
 alembic upgrade head
 python -m scripts.seed
@@ -94,6 +95,8 @@ cd apps/web && npm install && npm run dev
 ```
 
 Health check: `GET /api/v1/health`
+
+Diagnóstico operacional: `python -m scripts.doctor` imprime o ambiente e a URL do banco com senha mascarada para validar o bootstrap sem expor segredos em logs.
 
 ## Segurança obrigatória
 
