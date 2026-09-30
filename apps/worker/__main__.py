@@ -26,25 +26,23 @@ def build_handlers() -> dict:
 
 
 def run_forever(poll_seconds: float = 2.0) -> int:
-
-    from sqlalchemy import select
-
-    from apps.worker.engine import JOB_RUNNING, JobEngine
-    from packages.domain.models import Job
+    from apps.worker.engine import JobEngine
 
     handlers = build_handlers()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     log = logging.getLogger("urdia.worker")
     log.info("worker started (poll=%ss)", poll_seconds)
     try:
+        with SessionLocal() as session:
+            engine = JobEngine(session, handlers)
+            recovered = engine.recover_running()
+            session.commit()
+            if recovered:
+                log.info("recovered %d RUNNING job(s) from checkpoint", recovered)
+
         while True:
             with SessionLocal() as session:
                 engine = JobEngine(session, handlers)
-                running = session.scalar(select(Job.id).where(Job.status == JOB_RUNNING).limit(1))
-                if running:
-                    recovered = engine.recover_running()
-                    session.commit()
-                    log.info("recovered %d RUNNING job(s) from checkpoint", recovered)
                 job = engine.claim_next()
                 if job is None:
                     session.commit()
