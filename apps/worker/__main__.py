@@ -1,34 +1,91 @@
-"""Worker foundation shell (`python -m apps.worker`, Doc 07 run sequence).
+"""Worker resident process (`python -m apps.worker`, Doc 07 run sequence).
 
-The full job loop with checkpoints/retries arrives at the jobs milestone
-(Doc 17 step 13). Until then this verifies DB connectivity and reports pending
-jobs — real, testable behavior, no invented orchestration.
+Startup order (Doc 07 "Jobs"): inspect RUNNING jobs → checkpoint recovery →
+then poll. `--once` processes at most one job and exits (used by tests/CI).
+Ctrl+C stops gracefully.
 """
 
+import argparse
+import logging
 import sys
+import time
 
-from sqlalchemy import select
+from packages.shared.db import SessionLocal
 
-from packages.domain.models import Job
+
+def build_handlers() -> dict:
+    """Job handlers are registered here as milestones land (Doc 17 order).
+    Discovery/source handlers arrive at steps 16-17."""
+    return {}
+
+
+def run_forever(poll_seconds: float = 2.0) -> int:
+
+    from sqlalchemy import select
+
+    from apps.worker.engine import JOB_RUNNING, JobEngine
+    from packages.domain.models import Job
+
+    handlers = build_handlers()
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    log = logging.getLogger("urdia.worker")
+    log.info("worker started (poll=%ss)", poll_seconds)
+    try:
+        while True:
+            with SessionLocal() as session:
+                engine = JobEngine(session, handlers)
+                running = session.scalar(select(Job.id).where(Job.status == JOB_RUNNING).limit(1))
+                if running:
+                    recovered = engine.recover_running()
+                    session.commit()
+                    log.info("recovered %d RUNNING job(s) from checkpoint", recovered)
+                job = engine.claim_next()
+                if job is None:
+                    session.commit()
+                    time.sleep(poll_seconds)
+                    continue
+                log.info("running job %s (%s) attempt %s", job.id, job.job_type, job.attempt)
+                engine.run_job(job)
+                session.commit()
+                log.info("job %s → %s", job.id, job.status)
+    except KeyboardInterrupt:
+        log.info("worker stopped gracefully")
+        return 0
+
+
+def run_once() -> int:
+    from sqlalchemy import select
+
+    from apps.worker.engine import JOB_RUNNING, JobEngine
+    from packages.domain.models import Job
+
+    handlers = build_handlers()
+    with SessionLocal() as session:
+        engine = JobEngine(session, handlers)
+        stuck = session.scalar(select(Job.id).where(Job.status == JOB_RUNNING).limit(1))
+        if stuck:
+            recovered = engine.recover_running()
+            session.commit()
+            print(f"recovered {recovered} RUNNING job(s)")
+        job = engine.claim_next()
+        if job is None:
+            print("no pending jobs")
+            return 0
+        engine.run_job(job)
+        session.commit()
+        print(f"job {job.id} → {job.status}")
+        return 0 if job.status in ("SUCCEEDED", "CANCELLED") else 1
 
 
 def main() -> int:
-    from packages.shared.db import SessionLocal
-    from packages.shared.settings import get_settings
-
-    settings = get_settings()
-    print(f"URDIA HIL worker — env={settings.app_env}")
+    parser = argparse.ArgumentParser(description="URDIA HIL worker")
+    parser.add_argument("--once", action="store_true", help="process one cycle and exit")
+    args = parser.parse_args()
     try:
-        with SessionLocal() as session:
-            pending = session.scalar(
-                select(Job.id).where(Job.status == "PENDING").limit(1)
-            )
-        print("database: OK")
-        print(f"pending jobs: {'yes' if pending else 'none'}")
-        return 0
+        return run_once() if args.once else run_forever()
     except Exception as exc:
-        print(f"database: UNAVAILABLE ({exc.__class__.__name__})")
-        print("hint: docker compose up -d postgres && alembic upgrade head")
+        print(f"worker error: {exc.__class__.__name__}: {exc}", file=sys.stderr)
+        print("hint: docker compose up -d postgres && alembic upgrade head", file=sys.stderr)
         return 1
 
 

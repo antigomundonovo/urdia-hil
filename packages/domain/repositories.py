@@ -98,6 +98,16 @@ class JobRepository:
             )
         )
 
+    def list_for_workspace(self, workspace_id: UUID, limit: int = 200) -> list[Job]:
+        return list(
+            self.session.scalars(
+                select(Job)
+                .where(Job.workspace_id == workspace_id)
+                .order_by(Job.created_at.desc())
+                .limit(limit)
+            )
+        )
+
     def pending_for_workspace(self, workspace_id: UUID) -> list[Job]:
         return list(
             self.session.scalars(
