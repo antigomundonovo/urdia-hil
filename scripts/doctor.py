@@ -23,6 +23,12 @@ def main() -> int:
     print(f"ENV_FILE={_env_status()}")
     print(f"DATABASE_URL={settings.redacted_database_url}")
     print(f"API={settings.api_host}:{settings.api_port}")
+    email_ready = bool(
+        settings.smtp_host
+        and settings.smtp_from_email
+        and (settings.smtp_starttls or settings.smtp_use_ssl)
+    )
+    print(f"EMAIL_DELIVERY={'READY' if email_ready else 'NOT_CONFIGURED'}")
 
     issues = settings.validation_issues()
     if issues:

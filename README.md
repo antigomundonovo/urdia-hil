@@ -105,11 +105,17 @@ Diagnóstico operacional: `python -m scripts.doctor` (ou `urdia-doctor`) imprime
 ## Conta e sessão
 
 Na interface, crie uma conta com e-mail e senha de pelo menos 12 caracteres.
-Cada cadastro recebe um workspace privado. A sessão usa cookie HttpOnly com
-expiração de 12 horas; use **Sair** para revogá-la. Endpoints de dados exigem
-sessão válida e membership no workspace. V1 ainda não tem verificação de
-e-mail, recuperação de senha ou conexão OAuth; não exponha o auto-cadastro
-publicamente antes dessas proteções de produção.
+Cada cadastro recebe um workspace privado e precisa confirmar o e-mail antes
+de entrar. Configure `SMTP_HOST`, `SMTP_FROM_EMAIL` e, se exigido pelo servidor,
+`SMTP_USERNAME`/`SMTP_PASSWORD` no `.env`; mensagens usam STARTTLS por padrão
+(`SMTP_USE_SSL=true` habilita TLS implícito, normalmente na porta 465).
+A sessão usa cookie HttpOnly com expiração de 12 horas; **Sair** a revoga.
+Há fluxo de redefinição de senha por link de uso único. Endpoints de dados
+exigem sessão válida e membership no workspace. Ainda não há conexão OAuth
+com redes/plataformas; não exponha auto-cadastro publicamente até adicionar
+rate limiting compartilhado entre processos e MFA. Em produção, use
+`FRONTEND_BASE_URL` com HTTPS e configure o SMTP com STARTTLS ou TLS implícito
+(`SMTP_USE_SSL=true`).
 
 ## Segurança obrigatória
 

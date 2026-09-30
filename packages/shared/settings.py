@@ -34,6 +34,15 @@ class Settings(BaseSettings):
     default_profile_key: str = "antigo_mundo_novo"
     log_level: str = "INFO"
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+    frontend_base_url: str = "http://localhost:5173"
+
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_username: str | None = None
+    smtp_password: str = Field(default="", repr=False)
+    smtp_from_email: str | None = None
+    smtp_starttls: bool = True
+    smtp_use_ssl: bool = False
 
     @property
     def cors_origin_list(self) -> list[str]:

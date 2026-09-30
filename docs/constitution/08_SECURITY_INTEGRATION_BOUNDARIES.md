@@ -73,11 +73,18 @@ not cacheable. Unsafe browser requests require an exact allowed `Origin` to
 prevent cross-site request forgery; login responses do not distinguish unknown
 accounts from incorrect passwords.
 
-This local-first milestone does not yet implement email verification,
-password recovery, MFA, distributed rate-limit storage, or external account
-connections. Do not expose self-registration publicly until email verification
-and production-grade shared rate limiting are available. External OAuth tokens
-remain backend-only and are not implemented by this milestone.
+Email must be verified before login. Verification and password recovery use
+single-use random tokens; only token digests are persisted. Delivery uses
+configured SMTP with STARTTLS by default; message links and tokens are never
+logged. Password reset revokes every active URDIA session. Account-action
+request endpoints have the same response regardless of whether an account
+exists.
+
+This local-first milestone does not yet implement MFA, distributed rate-limit
+storage, or external account connections. Do not expose self-registration
+publicly until production-grade shared rate limiting and MFA are available.
+External OAuth tokens remain backend-only and are not implemented by this
+milestone.
 
 ## SSRF
 Para fetcher externo:
