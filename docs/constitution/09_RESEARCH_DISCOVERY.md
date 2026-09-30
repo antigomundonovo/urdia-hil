@@ -25,6 +25,8 @@ permanecem explicitamente indisponíveis até terem adaptadores e testes própri
 Resultados desses catálogos e índices são leads de descoberta, nunca evidência
 por si só. XML externo é rejeitado e todas as requisições usam o SafeFetcher,
 com validação de redirect, tamanho, timeout, robots e limite por host.
+Retrievals bem-sucedidos persistem ETag e Last-Modified; varreduras seguintes
+enviam validadores condicionais e registram HTTP 304 sem reprocessar resultados.
 
 ## Pipeline
 ```text

@@ -45,8 +45,35 @@ class RawItem:
 
 class SourceAdapter(Protocol):
     source_type: str
+    last_result: FetchResult | None
 
-    def fetch_items(self, source_url: str, fetcher: SafeFetcher) -> list[RawItem]: ...
+    def fetch_items(
+        self,
+        source_url: str,
+        fetcher: SafeFetcher | None = None,
+        *,
+        etag: str | None = None,
+        last_modified: str | None = None,
+    ) -> list[RawItem]: ...
+
+
+class _FetchingAdapter:
+    def __init__(self, fetcher: SafeFetcher) -> None:
+        self.fetcher = fetcher
+        self.last_result: FetchResult | None = None
+
+    def _fetch(
+        self,
+        source_url: str,
+        fetcher: SafeFetcher | None,
+        *,
+        etag: str | None,
+        last_modified: str | None,
+    ) -> FetchResult:
+        self.last_result = (fetcher or self.fetcher).fetch(
+            source_url, etag=etag, last_modified=last_modified
+        )
+        return self.last_result
 
 
 # --- RSS / Atom (namespace-aware, stdlib) --------------------------------
@@ -59,7 +86,7 @@ _NS = {
 
 
 def _require_success(result: FetchResult, source_type: str) -> None:
-    if not 200 <= result.status_code < 300:
+    if result.status_code != 304 and not 200 <= result.status_code < 300:
         raise AdapterError(f"{source_type} request returned HTTP {result.status_code}")
 
 
@@ -136,15 +163,23 @@ def _parse_feed(xml_bytes: bytes, source_type: str = "rss") -> list[RawItem]:
     return items
 
 
-class RssAdapter:
+class RssAdapter(_FetchingAdapter):
     source_type = "rss"
 
-    def __init__(self, fetcher: SafeFetcher) -> None:
-        self.fetcher = fetcher
-
-    def fetch_items(self, source_url: str, fetcher: SafeFetcher | None = None) -> list[RawItem]:
-        result = (fetcher or self.fetcher).fetch(source_url)
+    def fetch_items(
+        self,
+        source_url: str,
+        fetcher: SafeFetcher | None = None,
+        *,
+        etag: str | None = None,
+        last_modified: str | None = None,
+    ) -> list[RawItem]:
+        result = self._fetch(
+            source_url, fetcher, etag=etag, last_modified=last_modified
+        )
         _require_success(result, self.source_type)
+        if result.status_code == 304:
+            return []
         return _parse_feed(result.content, self.source_type)
 
 
@@ -162,13 +197,17 @@ def _local_name(tag: str) -> str:
     return tag.rsplit("}", 1)[-1]
 
 
-class SitemapAdapter:
+class SitemapAdapter(_FetchingAdapter):
     source_type = "sitemap"
 
-    def __init__(self, fetcher: SafeFetcher) -> None:
-        self.fetcher = fetcher
-
-    def fetch_items(self, source_url: str, fetcher: SafeFetcher | None = None) -> list[RawItem]:
+    def fetch_items(
+        self,
+        source_url: str,
+        fetcher: SafeFetcher | None = None,
+        *,
+        etag: str | None = None,
+        last_modified: str | None = None,
+    ) -> list[RawItem]:
         active_fetcher = fetcher or self.fetcher
         pending = [source_url]
         visited: set[str] = set()
@@ -182,8 +221,18 @@ class SitemapAdapter:
                 raise AdapterError("sitemap index exceeds document limit")
             visited.add(sitemap_url)
 
-            result = active_fetcher.fetch(sitemap_url)
+            if sitemap_url == source_url:
+                result = self._fetch(
+                    sitemap_url,
+                    active_fetcher,
+                    etag=etag,
+                    last_modified=last_modified,
+                )
+            else:
+                result = active_fetcher.fetch(sitemap_url)
             _require_success(result, self.source_type)
+            if result.status_code == 304:
+                return []
             root = _parse_xml(result.content, self.source_type)
             root_name = _local_name(root.tag)
             if root_name not in {"urlset", "sitemapindex"}:
@@ -254,14 +303,22 @@ def _date_from_crossref(record: dict[str, Any]) -> str | None:
     return None
 
 
-class CrossrefAdapter:
+class CrossrefAdapter(_FetchingAdapter):
     source_type = "crossref"
 
-    def __init__(self, fetcher: SafeFetcher) -> None:
-        self.fetcher = fetcher
-
-    def fetch_items(self, source_url: str, fetcher: SafeFetcher | None = None) -> list[RawItem]:
-        result = (fetcher or self.fetcher).fetch(source_url)
+    def fetch_items(
+        self,
+        source_url: str,
+        fetcher: SafeFetcher | None = None,
+        *,
+        etag: str | None = None,
+        last_modified: str | None = None,
+    ) -> list[RawItem]:
+        result = self._fetch(
+            source_url, fetcher, etag=etag, last_modified=last_modified
+        )
+        if result.status_code == 304:
+            return []
         payload = _parse_json_result(result, self.source_type)
         message = payload.get("message")
         records = message.get("items") if isinstance(message, dict) else None
@@ -304,14 +361,22 @@ class CrossrefAdapter:
         return items
 
 
-class OpenAlexAdapter:
+class OpenAlexAdapter(_FetchingAdapter):
     source_type = "openalex"
 
-    def __init__(self, fetcher: SafeFetcher) -> None:
-        self.fetcher = fetcher
-
-    def fetch_items(self, source_url: str, fetcher: SafeFetcher | None = None) -> list[RawItem]:
-        result = (fetcher or self.fetcher).fetch(source_url)
+    def fetch_items(
+        self,
+        source_url: str,
+        fetcher: SafeFetcher | None = None,
+        *,
+        etag: str | None = None,
+        last_modified: str | None = None,
+    ) -> list[RawItem]:
+        result = self._fetch(
+            source_url, fetcher, etag=etag, last_modified=last_modified
+        )
+        if result.status_code == 304:
+            return []
         payload = _parse_json_result(result, self.source_type)
         records = payload.get("results")
         if not isinstance(records, list):
@@ -379,8 +444,16 @@ class NotImplementedAdapter:
 
     def __init__(self, source_type: str) -> None:
         self.source_type = source_type
+        self.last_result: FetchResult | None = None
 
-    def fetch_items(self, source_url: str, fetcher: SafeFetcher | None = None) -> list[RawItem]:
+    def fetch_items(
+        self,
+        source_url: str,
+        fetcher: SafeFetcher | None = None,
+        *,
+        etag: str | None = None,
+        last_modified: str | None = None,
+    ) -> list[RawItem]:
         raise AdapterError(f"adapter '{self.source_type}' not implemented yet (Doc 09)")
 
 

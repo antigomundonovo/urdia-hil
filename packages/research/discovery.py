@@ -17,11 +17,12 @@ from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from packages.domain.models import DiscoveryCluster, DiscoveryItem, Retrieval, Source
-from packages.research.adapters import AdapterError, RawItem, get_adapter
+from packages.research.adapters import AdapterError, RawItem, content_hash_of, get_adapter
 from packages.research.fetcher import FetchBlockedError, SafeFetcher
 
 logger = logging.getLogger(__name__)
@@ -104,6 +105,17 @@ class DiscoveryEngine:
     def scan_source(self, source: Source) -> ScanReport:
         started = datetime.now(UTC)
         report = ScanReport(source_id=source.id)
+        previous_retrieval = self.session.scalars(
+            select(Retrieval)
+            .where(
+                Retrieval.workspace_id == source.workspace_id,
+                Retrieval.profile_id == source.profile_id,
+                Retrieval.source_id == source.id,
+                Retrieval.status.in_(("OK", "NOT_MODIFIED")),
+            )
+            .order_by(Retrieval.created_at.desc(), Retrieval.id.desc())
+            .limit(1)
+        ).first()
         retrieval = Retrieval(
             workspace_id=source.workspace_id,
             profile_id=source.profile_id,
@@ -111,18 +123,54 @@ class DiscoveryEngine:
             status="RUNNING",
         )
         self.session.add(retrieval)
+        adapter = None
         try:
             adapter = get_adapter(source.source_type, self.fetcher)
-            items: list[RawItem] = adapter.fetch_items(source.url)
-        except (FetchBlockedError, AdapterError) as exc:
+            items: list[RawItem] = adapter.fetch_items(
+                source.url,
+                etag=previous_retrieval.etag if previous_retrieval else None,
+                last_modified=(
+                    previous_retrieval.last_modified if previous_retrieval else None
+                ),
+            )
+        except (FetchBlockedError, AdapterError, httpx.HTTPError) as exc:
             report.status = "FAILED"
             report.error = str(exc)
             retrieval.status = "FAILED"
             retrieval.error = str(exc)
+            result = getattr(adapter, "last_result", None)
+            if result is not None:
+                retrieval.http_status = result.status_code
+            self._finish(retrieval, report, started)
+            return report
+
+        result = adapter.last_result
+        if result is None:
+            report.status = "FAILED"
+            report.error = "source adapter returned no fetch result"
+            retrieval.status = "FAILED"
+            retrieval.error = report.error
+            self._finish(retrieval, report, started)
+            return report
+        retrieval.http_status = result.status_code
+        retrieval.etag = result.etag or (
+            previous_retrieval.etag if previous_retrieval else None
+        )
+        retrieval.last_modified = result.last_modified or (
+            previous_retrieval.last_modified if previous_retrieval else None
+        )
+        if result.status_code == 304:
+            report.status = "NOT_MODIFIED"
+            retrieval.status = "NOT_MODIFIED"
+            retrieval.content_hash = (
+                previous_retrieval.content_hash if previous_retrieval else None
+            )
+            source.last_seen_at = datetime.now(UTC)
             self._finish(retrieval, report, started)
             return report
 
         report.items_seen = len(items)
+        retrieval.content_hash = content_hash_of(result)
         seen_hashes = self._existing_hashes(source.workspace_id)
         seen_urls = self._existing_urls(source.workspace_id)
 

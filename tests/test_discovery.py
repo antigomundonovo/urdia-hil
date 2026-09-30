@@ -275,6 +275,102 @@ def test_scan_creates_items_dedups_and_clusters(db, world):
     assert len(retrievals) == 2
 
 
+def test_scan_uses_persisted_http_validators_and_records_not_modified(db, world):
+    ws, profile = world
+    source = Source(
+        workspace_id=ws.id,
+        profile_id=profile.id,
+        url="http://public.test/conditional-feed",
+        source_type="rss",
+    )
+    db.add(source)
+    db.flush()
+    request_headers: list[httpx.Headers] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        request_headers.append(request.headers)
+        if request.headers.get("if-none-match") == '"feed-v1"':
+            return httpx.Response(304)
+        return httpx.Response(
+            200,
+            content=RSS,
+            headers={
+                "etag": '"feed-v1"',
+                "last-modified": "Tue, 29 Sep 2026 10:00:00 GMT",
+            },
+        )
+
+    fetcher = SafeFetcher(
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        respect_robots=False,
+        min_host_interval=0.0,
+        resolver=lambda host: ["93.184.216.34"],
+    )
+    engine = DiscoveryEngine(db, fetcher)
+
+    first = engine.scan_source(source)
+    db.flush()
+    second = engine.scan_source(source)
+    db.flush()
+    retrievals = list(
+        db.scalars(
+            select(Retrieval)
+            .where(Retrieval.source_id == source.id)
+            .order_by(Retrieval.created_at, Retrieval.id)
+        )
+    )
+
+    assert first.status == "OK"
+    assert first.items_new == 2
+    assert second.status == "NOT_MODIFIED"
+    assert second.items_seen == second.items_new == second.duplicates == 0
+    assert request_headers[1]["if-none-match"] == '"feed-v1"'
+    assert request_headers[1]["if-modified-since"] == "Tue, 29 Sep 2026 10:00:00 GMT"
+    successful = next(retrieval for retrieval in retrievals if retrieval.status == "OK")
+    not_modified = next(
+        retrieval for retrieval in retrievals if retrieval.status == "NOT_MODIFIED"
+    )
+    assert successful.http_status == 200
+    assert not_modified.http_status == 304
+    assert all(retrieval.etag == '"feed-v1"' for retrieval in retrievals)
+    assert all(
+        retrieval.last_modified == "Tue, 29 Sep 2026 10:00:00 GMT"
+        for retrieval in retrievals
+    )
+    assert successful.content_hash == not_modified.content_hash
+
+
+def test_scan_records_http_failures_without_losing_source_state(db, world):
+    ws, profile = world
+    source = Source(
+        workspace_id=ws.id,
+        profile_id=profile.id,
+        url="http://public.test/unavailable-feed",
+        source_type="rss",
+    )
+    db.add(source)
+    db.flush()
+    fetcher = SafeFetcher(
+        client=httpx.Client(
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(503, content=b"temporarily unavailable")
+            )
+        ),
+        respect_robots=False,
+        min_host_interval=0.0,
+        resolver=lambda host: ["93.184.216.34"],
+    )
+
+    report = DiscoveryEngine(db, fetcher).scan_source(source)
+    retrieval = db.scalar(select(Retrieval).where(Retrieval.source_id == source.id))
+
+    assert report.status == "FAILED"
+    assert "HTTP 503" in report.error
+    assert retrieval.status == "FAILED"
+    assert retrieval.http_status == 503
+    assert source.last_seen_at is None
+
+
 def test_same_content_in_two_sources_clusters_not_duplicates(db, world):
     ws, profile = world
     s1 = Source(
