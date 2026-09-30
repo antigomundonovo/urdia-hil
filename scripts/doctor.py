@@ -2,15 +2,25 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from sqlalchemy import create_engine, text
 
 from packages.shared.settings import get_settings
+
+
+def _env_status() -> str:
+    env_file = Path(".env")
+    if env_file.exists():
+        return "READY"
+    return "MISSING"
 
 
 def main() -> int:
     settings = get_settings()
     url = settings.effective_database_url
     print(f"APP_ENV={settings.app_env}")
+    print(f"ENV_FILE={_env_status()}")
     print(f"DATABASE_URL={settings.redacted_database_url}")
     print(f"API={settings.api_host}:{settings.api_port}")
 

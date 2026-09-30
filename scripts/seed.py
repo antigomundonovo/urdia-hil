@@ -6,7 +6,7 @@ stored verbatim in editorial_policy JSONB so nothing is lost or re-interpreted;
 `language`/`audience_region`/`automation_level` columns mirror their spec keys.
 """
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from packages.domain.models import Profile, Workspace
 from packages.shared.db import SessionLocal
@@ -32,7 +32,18 @@ ANM_EDITORIAL_POLICY: dict = {
 }
 
 
+def ensure_database_is_ready() -> None:
+    try:
+        with SessionLocal() as session:
+            session.execute(text("SELECT 1"))
+    except Exception as exc:
+        raise RuntimeError(
+            "PostgreSQL not reachable. Start the database with: docker compose up -d postgres"
+        ) from exc
+
+
 def seed() -> None:
+    ensure_database_is_ready()
     with SessionLocal() as session:
         workspace = session.scalar(select(Workspace).where(Workspace.name == "URDIA"))
         if workspace is None:
