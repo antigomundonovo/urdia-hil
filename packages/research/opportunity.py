@@ -179,6 +179,14 @@ class OpportunityService:
             self.transition(ctx, opp, state, reason=reason)
         return opp
 
+    def get_session_ctx(self, opp: Opportunity) -> ExecutionContext:
+        """ExecutionContext derived from the stored row — workspace/profile
+        scoping comes from the database, never from the request (Doc 08)."""
+        return ExecutionContext(
+            workspace_id=opp.workspace_id,
+            profile_id=opp.profile_id,
+        )
+
     # --- JEV (deterministic layer) ------------------------------------------
 
     def jev_recommend(self, ctx: ExecutionContext, opp: Opportunity) -> JEVRecommendationResult:

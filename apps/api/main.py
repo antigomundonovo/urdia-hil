@@ -6,6 +6,7 @@ and added when the web app lands; never a wildcard for authenticated endpoints.
 
 from fastapi import FastAPI
 
+from apps.api.content_routes import router as content_router
 from apps.api.jobs_routes import router as jobs_router
 from apps.api.registry_routes import router as registry_router
 from apps.api.sources_routes import router as sources_router
@@ -13,10 +14,11 @@ from packages.domain.enums import HealthState
 from packages.shared.db import engine
 from packages.shared.settings import get_settings
 
-app = FastAPI(title="URDIA HIL API", version="0.5.0", docs_url="/api/docs")
+app = FastAPI(title="URDIA HIL API", version="0.9.0", docs_url="/api/docs")
 app.include_router(registry_router)
 app.include_router(jobs_router)
 app.include_router(sources_router)
+app.include_router(content_router)
 
 
 @app.get("/api/v1/health")

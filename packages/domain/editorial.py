@@ -54,34 +54,49 @@ class Opportunity(Base):
     )
 
 
-def _link_table(name: str, ref_table: str):
-    class _Link(Base):
-        __tablename__ = name
-        __table_args__ = (
-            UniqueConstraint("opportunity_id", "ref_id", name=f"uq_{name}"),
-        )
+class OpportunitySource(Base):
+    __tablename__ = "opportunity_sources"
+    __table_args__ = (UniqueConstraint("opportunity_id", "ref_id", name="uq_opportunity_sources"),)
 
-        id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
-        workspace_id: Mapped[uuid.UUID] = mapped_column(
-            ForeignKey("workspaces.id"), nullable=False
-        )
-        opportunity_id: Mapped[uuid.UUID] = mapped_column(
-            ForeignKey("opportunities.id", ondelete="CASCADE"), nullable=False
-        )
-        ref_id: Mapped[uuid.UUID] = mapped_column(ForeignKey(ref_table), nullable=False)
-        created_at: Mapped[datetime] = mapped_column(
-            DateTime(timezone=True), server_default=func.now(), nullable=False
-        )
-
-    _Link.__name__ = name.capitalize()
-    return _Link
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id"), nullable=False)
+    opportunity_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("opportunities.id", ondelete="CASCADE"), nullable=False
+    )
+    ref_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("sources.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
 
-# Doc 04 lists the three link tables explicitly; dynamic class creation keeps
-# them in one place with identical shape.
-OpportunitySource = _link_table("opportunity_sources", "sources.id")
-OpportunityClaim = _link_table("opportunity_claims", "claims.id")
-OpportunityAsset = _link_table("opportunity_assets", "assets.id")
+class OpportunityClaim(Base):
+    __tablename__ = "opportunity_claims"
+    __table_args__ = (UniqueConstraint("opportunity_id", "ref_id", name="uq_opportunity_claims"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id"), nullable=False)
+    opportunity_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("opportunities.id", ondelete="CASCADE"), nullable=False
+    )
+    ref_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("claims.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class OpportunityAsset(Base):
+    __tablename__ = "opportunity_assets"
+    __table_args__ = (UniqueConstraint("opportunity_id", "ref_id", name="uq_opportunity_assets"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("workspaces.id"), nullable=False)
+    opportunity_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("opportunities.id", ondelete="CASCADE"), nullable=False
+    )
+    ref_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("assets.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
 
 class FormatPlan(Base):
