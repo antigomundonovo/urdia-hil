@@ -17,6 +17,7 @@ dependencies = [
     "psycopg[binary]>=3.2",
     "pgvector>=0.3.6",
     "httpx>=0.28",
+    "pillow>=11.0",
 ]
 
 [project.optional-dependencies]
@@ -49,3 +50,5 @@ select = ["E", "F", "I", "UP", "B"]
 "tests/test_db_core.py" = ["F841"]
 # FastAPI's canonical DI idiom uses Query(...)/Depends(...) in defaults.
 "apps/api/**" = ["B008"]
+# Ops scripts: long report lines and local imports are fine here.
+"scripts/**" = ["E501", "I001", "E401", "UP017"]

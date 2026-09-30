@@ -41,6 +41,8 @@ jobs:
         run: python -m apps.worker --once
       - name: Tests (unit + integration + DB parity)
         run: pytest -q
+      - name: Benchmark (Doc 16)
+        run: python -m scripts.benchmark
 
   web:
     runs-on: ubuntu-latest

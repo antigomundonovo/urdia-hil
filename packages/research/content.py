@@ -221,13 +221,29 @@ class ContentService:
             "no assets attached",
         )
 
-        # ORIGINALITY — analyzer milestone pending; WARNING so it never
-        # silently passes (afirme pouco)
-        _set(
-            QualityGate.ORIGINALITY,
-            GateResult.WARNING,
-            "originality analyzer not yet implemented",
-        )
+        # ORIGINALITY — deterministic shingle check of the draft against the
+        # evidence excerpts of the claims it uses (Doc 16: exact/near copy)
+        source_texts: list[tuple[str, str]] = []
+        if claim_ids:
+            for record in self.session.scalars(
+                select(EvidenceRecord).where(EvidenceRecord.claim_id.in_(claim_ids))
+            ):
+                if record.excerpt:
+                    source_texts.append((f"evidence:{record.id}", record.excerpt))
+        if canonical and canonical.editorial_angle:
+            source_texts.append(("canonical:angle", canonical.editorial_angle))
+        if draft:
+            from packages.research.analyzers import check_originality
+
+            draft_text = f"{draft.title or ''} {draft.caption or ''}"
+            originality = check_originality(draft_text, source_texts)
+            _set(
+                QualityGate.ORIGINALITY,
+                GateResult(originality.result),
+                "; ".join(originality.notes) or None,
+            )
+        else:
+            _set(QualityGate.ORIGINALITY, GateResult.WARNING, "no draft to check")
 
         # SEO — canonical has entities
         seo_entities = (canonical.seo_entities or []) if canonical else []
@@ -251,13 +267,23 @@ class ContentService:
             "no platform plans recorded",
         )
 
-        # RELEVANCE + ANTI-SLOP — placeholders that never auto-pass
+        # RELEVANCE — the Why must be stated (Doc 12)
         _set(
             QualityGate.RELEVANCE,
             GateResult.PASS if opp.why_profile else GateResult.WARNING,
             "why_profile empty",
         )
-        _set(QualityGate.ANTI_SLOP, GateResult.WARNING, "anti-slop analyzer not yet implemented")
+        # ANTI-SLOP — deterministic pt-BR heuristics; never FAILs (human judgement)
+        from packages.research.analyzers import check_anti_slop
+
+        slop = check_anti_slop(
+            draft.title if draft else "", draft.caption if draft else ""
+        )
+        _set(
+            QualityGate.ANTI_SLOP,
+            GateResult(slop.result),
+            "; ".join(slop.findings) or None,
+        )
 
         # HUMAN_REVIEW — always REQUIRED in V1 (Doc 00 §22)
         gates["human_review"] = GateResult.REQUIRED.value

@@ -46,3 +46,4 @@ Thumbs.db
 .vscode/
 .pytest_tmp/
 .pytest_tmp/
+backups/

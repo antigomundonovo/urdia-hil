@@ -12,6 +12,10 @@ export default function OpportunityDetail() {
   const [platform, setPlatform] = useState("instagram");
   const [qc, setQc] = useState<QcResult | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [format, setFormat] = useState("PHOTO_POST");
+  const [packageId, setPackageId] = useState<string | null>(null);
+  const [draftTitle, setDraftTitle] = useState("");
+  const [draftCaption, setDraftCaption] = useState("");
 
   const { data: opp } = useQuery({
     queryKey: ["opportunity", id, workspaceId],
@@ -23,6 +27,8 @@ export default function OpportunityDetail() {
   const runQc = useMutation({
     mutationFn: () =>
       api.post<QcResult>(`/api/v1/opportunities/${id}/run-qc?workspace_id=${workspaceId}`),
+    onSuccess: (result) => setQc(result),
+    onError: (e) => setMessage((e as Error).message),
   });
   const approve = useMutation({
     mutationFn: () =>
@@ -77,6 +83,75 @@ export default function OpportunityDetail() {
             </span>
           </div>
         </div>
+      </section>
+
+      <section className="rounded-lg border border-stone-200 bg-white p-5">
+        <h3 className="text-sm font-semibold uppercase tracking-wide text-stone-500">
+          Produção (Documento 06 — editor V1)
+        </h3>
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <select
+            value={format}
+            onChange={(e) => setFormat(e.target.value)}
+            className="rounded border border-stone-300 px-3 py-2 text-sm"
+          >
+            <option value="PHOTO_POST">Foto comentada</option>
+            <option value="CAROUSEL">Carrossel</option>
+            <option value="MICROLOOP">Microloop</option>
+          </select>
+          <button
+            onClick={() =>
+              api
+                .post<{ package_id: string }>(
+                  `/api/v1/opportunities/${id}/create-content?workspace_id=${workspaceId}`,
+                  { format }
+                )
+                .then((r) => {
+                  setPackageId(r.package_id);
+                  setMessage(`Pacote criado (${format}). Escreva o rascunho abaixo.`);
+                })
+                .catch((e) => setMessage((e as Error).message))
+            }
+            className="rounded border border-stone-300 px-4 py-2 text-sm font-medium hover:bg-stone-50"
+          >
+            Criar conteúdo
+          </button>
+        </div>
+        {packageId && (
+          <div className="mt-4 space-y-2">
+            <input
+              value={draftTitle}
+              onChange={(e) => setDraftTitle(e.target.value)}
+              placeholder="título do post"
+              className="w-full rounded border border-stone-300 px-3 py-2 text-sm"
+            />
+            <textarea
+              value={draftCaption}
+              onChange={(e) => setDraftCaption(e.target.value)}
+              placeholder="legenda — a prova (claim) usada fica rastreável no sistema"
+              rows={3}
+              className="w-full rounded border border-stone-300 px-3 py-2 text-sm"
+            />
+            <button
+              onClick={() =>
+                api
+                  .post<{ draft_id: string }>(
+                    `/api/v1/content/${packageId}/generate-draft?workspace_id=${workspaceId}`,
+                    { title: draftTitle, caption: draftCaption, claim_ids_used: [] }
+                  )
+                  .then(() => setMessage("Rascunho salvo — rode o QC e decida."))
+                  .catch((e) => setMessage((e as Error).message))
+              }
+              disabled={!draftTitle || !draftCaption}
+              className="rounded bg-stone-900 px-4 py-2 text-sm font-medium text-white hover:bg-stone-700 disabled:opacity-40"
+            >
+              Salvar rascunho
+            </button>
+            <p className="text-xs text-stone-400">
+              O QC valida evidência e direitos pelas claims/assets já vinculados à oportunidade.
+            </p>
+          </div>
+        )}
       </section>
 
       <section className="rounded-lg border border-stone-200 bg-white p-5">

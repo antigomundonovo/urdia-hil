@@ -59,13 +59,23 @@ def detect_mime(content: bytes) -> str | None:
     return None
 
 
-def perceptual_hash_placeholder(content: bytes) -> str:
-    """Real perceptual hashing (imagephash) arrives with the rendering
-    milestone (needs Pillow); SHA-256 of decoded content stands in as a
-    deterministic placeholder — duplicate detection remains exact-copy only
-    until then, which is the conservative direction (never false-positive
-    identity)."""
-    return hashlib.sha256(content).hexdigest()[:16]
+def perceptual_hash(content: bytes, size: int = 16) -> str | None:
+    """Average hash (aHash) via Pillow — 64-bit hex. Deterministic, standard
+    algorithm; catches re-encodings/resizes that exact SHA-256 misses. If the
+    bytes cannot be decoded as an image, returns None (never invents a hash)."""
+    import io
+
+    try:
+        from PIL import Image
+
+        with Image.open(io.BytesIO(content)) as image:
+            gray = image.convert("L").resize((size, size))
+        pixels = list(gray.getdata())
+        average = sum(pixels) / len(pixels)
+        bits = "".join("1" if p > average else "0" for p in pixels)
+        return f"{int(bits, 2):016x}"
+    except Exception:
+        return None
 
 
 class PhotoService:
@@ -100,7 +110,7 @@ class PhotoService:
 
         # 2. hashes
         file_hash = hashlib.sha256(content).hexdigest()
-        phash = perceptual_hash_placeholder(content)
+        phash = perceptual_hash(content)
 
         # 3. duplicate detection (Doc 10: file hash first — exact copies)
         existing = self.session.scalars(
