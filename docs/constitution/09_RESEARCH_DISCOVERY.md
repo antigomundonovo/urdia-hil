@@ -19,6 +19,13 @@ Internet Archive
 Wikimedia
 ```
 
+Implementados na V1: RSS/Atom, sitemap (URL set e índice com limites de
+documentos/itens) e metadados acadêmicos Crossref/OpenAlex. Os demais tipos
+permanecem explicitamente indisponíveis até terem adaptadores e testes próprios.
+Resultados desses catálogos e índices são leads de descoberta, nunca evidência
+por si só. XML externo é rejeitado e todas as requisições usam o SafeFetcher,
+com validação de redirect, tamanho, timeout, robots e limite por host.
+
 ## Pipeline
 ```text
 source config

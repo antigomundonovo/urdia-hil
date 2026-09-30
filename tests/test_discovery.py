@@ -1,6 +1,7 @@
 """Discovery engine tests (Doc 09): normalize, dedup, cluster, observability,
 and RSS/Atom adapters against canned feeds — no real network."""
 
+import json
 import uuid
 
 import httpx
@@ -62,9 +63,10 @@ def test_parse_feed_rss_and_atom():
     rss_items = _parse_feed(RSS)
     assert len(rss_items) == 2
     assert rss_items[0].url == "http://arquivo.test/post-1?utm_source=x"
-    atom_items = _parse_feed(ATOM)
+    atom_items = _parse_feed(ATOM, "atom")
     assert len(atom_items) == 1
     assert atom_items[0].url == "http://arquivo.test/atom-1"
+    assert atom_items[0].raw["source"] == "atom"
 
 
 def test_unknown_and_unimplemented_adapters_fail_loudly():
@@ -73,6 +75,163 @@ def test_unknown_and_unimplemented_adapters_fail_loudly():
     adapter = get_adapter("wikidata", None)  # declared, not implemented yet
     with pytest.raises(AdapterError, match="not implemented"):
         adapter.fetch_items("http://x.test", None)
+
+
+def test_sitemap_adapter_reads_urlsets_and_indexes():
+    from packages.research.adapters import SitemapAdapter
+
+    index_url = "http://public.test/sitemap.xml"
+    child_url = "http://public.test/child.xml"
+    fetcher = _fetcher_for(
+        {
+            index_url: b"""<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+              <sitemap><loc>http://public.test/child.xml</loc></sitemap>
+            </sitemapindex>""",
+            child_url: b"""<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+              <url><loc>https://museum.test/item/1</loc><lastmod>2026-09-30</lastmod></url>
+              <url><loc>https://museum.test/item/2</loc></url>
+            </urlset>""",
+        }
+    )
+
+    items = SitemapAdapter(fetcher).fetch_items(index_url)
+
+    assert [(item.url, item.published_at) for item in items] == [
+        ("https://museum.test/item/1", "2026-09-30"),
+        ("https://museum.test/item/2", None),
+    ]
+    assert all(item.raw == {"source": "sitemap"} for item in items)
+
+
+def test_sitemap_adapter_rejects_dtd_and_invalid_locations():
+    from packages.research.adapters import SitemapAdapter
+
+    dtd_fetcher = _fetcher_for(
+        {
+            "http://public.test/sitemap.xml": b"""<!DOCTYPE foo [<!ENTITY x "boom">]>
+              <urlset><url><loc>https://museum.test/&x;</loc></url></urlset>"""
+        }
+    )
+    with pytest.raises(AdapterError, match="declarations are not allowed"):
+        SitemapAdapter(dtd_fetcher).fetch_items("http://public.test/sitemap.xml")
+
+    invalid_location_fetcher = _fetcher_for(
+        {
+            "http://public.test/sitemap.xml": b"""<urlset>
+              <url><loc>file:///private/data</loc></url></urlset>"""
+        }
+    )
+    with pytest.raises(AdapterError, match="valid absolute HTTP"):
+        SitemapAdapter(invalid_location_fetcher).fetch_items(
+            "http://public.test/sitemap.xml"
+        )
+
+
+def test_sitemap_adapter_wraps_malformed_location_urls():
+    from packages.research.adapters import SitemapAdapter
+
+    fetcher = _fetcher_for(
+        {
+            "http://public.test/sitemap.xml": b"""<urlset>
+              <url><loc>https://[broken/item</loc></url></urlset>"""
+        }
+    )
+    with pytest.raises(AdapterError, match="valid absolute HTTP"):
+        SitemapAdapter(fetcher).fetch_items("http://public.test/sitemap.xml")
+
+
+def test_academic_adapters_normalize_crossref_and_openalex_results():
+    from packages.research.adapters import CrossrefAdapter, OpenAlexAdapter
+
+    crossref_url = "http://public.test/crossref"
+    openalex_url = "http://public.test/openalex"
+    fetcher = _fetcher_for(
+        {
+            crossref_url: json.dumps(
+                {
+                    "message": {
+                        "items": [
+                            {
+                                "DOI": "10.1234/history",
+                                "title": ["História urbana"],
+                                "published": {"date-parts": [[1911, 2, 3]]},
+                                "abstract": (
+                                    "<jats:p xmlns:jats='http://www.w3.org/1999/xhtml'>"
+                                    "Documento <jats:italic>histórico</jats:italic>.</jats:p>"
+                                ),
+                                "publisher": "Arquivo Acadêmico",
+                                "type": "article-journal",
+                            }
+                        ]
+                    }
+                }
+            ).encode(),
+            openalex_url: json.dumps(
+                {
+                    "results": [
+                        {
+                            "id": "https://openalex.org/W1",
+                            "doi": "https://doi.org/10.1234/work",
+                            "display_name": "Estudo documental",
+                            "publication_date": "2024-05-01",
+                            "primary_location": {
+                                "landing_page_url": "https://journal.test/article"
+                            },
+                            "abstract_inverted_index": {
+                                "Fonte": [0],
+                                "primária": [1],
+                                "relevante": [2],
+                            },
+                        }
+                    ]
+                }
+            ).encode(),
+        }
+    )
+
+    crossref = CrossrefAdapter(fetcher).fetch_items(crossref_url)
+    openalex = OpenAlexAdapter(fetcher).fetch_items(openalex_url)
+
+    assert crossref[0].url == "https://doi.org/10.1234/history"
+    assert crossref[0].title == "História urbana"
+    assert crossref[0].summary == "Documento histórico."
+    assert crossref[0].published_at == "1911-02-03"
+    assert crossref[0].raw["publisher"] == "Arquivo Acadêmico"
+    assert openalex[0].url == "https://journal.test/article"
+    assert openalex[0].summary == "Fonte primária relevante"
+    assert openalex[0].published_at == "2024-05-01"
+
+
+def test_openalex_adapter_handles_sparse_abstract_index():
+    from packages.research.adapters import OpenAlexAdapter
+
+    url = "http://public.test/openalex"
+    fetcher = _fetcher_for(
+        {
+            url: json.dumps(
+                {
+                    "results": [
+                        {
+                            "id": "https://openalex.org/W2",
+                            "abstract_inverted_index": {"contexto": [0], "histórico": [2]},
+                        }
+                    ]
+                }
+            ).encode()
+        }
+    )
+    item = OpenAlexAdapter(fetcher).fetch_items(url)[0]
+    assert item.summary == "contexto histórico"
+
+
+def test_adapters_fail_loudly_on_http_errors():
+    from packages.research.adapters import CrossrefAdapter, RssAdapter
+
+    fetcher = _fetcher_for({})
+    with pytest.raises(AdapterError, match="HTTP 404"):
+        RssAdapter(fetcher).fetch_items("http://public.test/missing")
+    with pytest.raises(AdapterError, match="HTTP 404"):
+        CrossrefAdapter(fetcher).fetch_items("http://public.test/missing")
 
 
 @pytest.fixture()
