@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "urdia-hil"
-version = "0.2.0"
+version = "0.3.0"
 description = "URDIA — History Intelligence Layer: motor de inteligência editorial histórica"
 requires-python = ">=3.12"
 dependencies = [
@@ -46,3 +46,5 @@ select = ["E", "F", "I", "UP", "B"]
 # typing.Union) — style rules don't apply to versioned DDL.
 "migrations/**" = ["E501", "UP007", "UP035", "I001"]
 "tests/test_db_core.py" = ["F841"]
+# FastAPI's canonical DI idiom uses Query(...)/Depends(...) in defaults.
+"apps/api/**" = ["B008"]

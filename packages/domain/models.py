@@ -89,27 +89,46 @@ class Profile(Base, TimestampMixin):
 
 
 class Provider(Base, TimestampMixin):
-    """Provider Registry (Doc 00 §24) — minimal identity now, registry fields
-    extended at the governance milestone."""
+    """Provider Registry (Doc 00 §24): provider, version, privacy, license,
+    health, last_verified. Config carries non-secret settings only (Doc 08)."""
 
     __tablename__ = "providers"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
     key: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     name: Mapped[str | None] = mapped_column(String(255))
+    version: Mapped[str | None] = mapped_column(String(64))
     status: Mapped[str | None] = mapped_column(String(32))
+    privacy: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    license: Mapped[str | None] = mapped_column(String(128))
+    health: Mapped[str | None] = mapped_column(String(32))
+    last_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    config: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
 
 
 class Capability(Base, TimestampMixin):
-    """Capability Registry (Doc 00 §24) — minimal identity now."""
+    """Capability Registry (Doc 00 §24): version, schema, quota, cost,
+    fallback, allowed profiles. allowed_profiles stores profile keys;
+    NULL/empty list = allowed for every profile (documented decision —
+    fail-closed still applies to status/health/quota)."""
 
     __tablename__ = "capabilities"
 
     id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
     provider_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("providers.id"))
+    fallback_provider_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("providers.id")
+    )
     key: Mapped[str] = mapped_column(String(128), nullable=False)
     version: Mapped[str | None] = mapped_column(String(32))
     status: Mapped[str | None] = mapped_column(String(32))
+    schema_: Mapped[dict[str, Any] | None] = mapped_column("schema", JSONB)
+    quota: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    cost: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    allowed_profiles: Mapped[list[Any] | None] = mapped_column(JSONB)
+    last_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (Index("ix_capabilities_key", "key"),)
 
 
 class Job(Base, TimestampMixin):
