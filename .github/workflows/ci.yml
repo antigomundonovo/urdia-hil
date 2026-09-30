@@ -38,6 +38,6 @@ jobs:
       - name: Seed (dev smoke)
         run: python -m scripts.seed
       - name: Worker shell smoke
-        run: python -m apps.worker
+        run: python -m apps.worker --once
       - name: Tests (unit + integration + DB parity)
         run: pytest -q
