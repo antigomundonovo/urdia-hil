@@ -17,27 +17,30 @@ def build_handlers() -> dict:
     """Job handlers registered as milestones land (Doc 17 order).
     SOURCE_RETRIEVAL reuses the discovery scan for a single source."""
     from apps.worker.handlers_new import (
-    CLAIM_VERIFICATION,
-    DISCOVERY_SCAN,
-    SOURCE_RETRIEVAL,
-    OPPORTUNITY_ANALYSIS,
-    SOURCE_EXTRACTION,
-    SOURCE_CLUSTERING,
-    IMAGE_ANALYSIS,
-    IMAGE_RESEARCH,
-    RIGHTS_RESEARCH,
-    CLAIM_EXTRACTION,
-    ADVERSARIAL_RESEARCH,
-    FORMAT_PLANNING,
-    CONTENT_GENERATION,
-    VISUAL_GENERATION,
-    QC,
-    EXPORT,
-    PUBLICATION,
-    ANALYTICS_SYNC,
-    COMMENT_SYNC,
-    LEARNING_ANALYSIS,
-)
+        CLAIM_VERIFICATION,
+        DISCOVERY_SCAN,
+        SOURCE_RETRIEVAL,
+        SOURCE_EXTRACTION,
+        SOURCE_CLUSTERING,
+        IMAGE_RESEARCH,
+        ADVERSARIAL_RESEARCH,
+        CONTENT_GENERATION,
+        VISUAL_GENERATION,
+        QC,
+        EXPORT,
+        PUBLICATION,
+        ANALYTICS_SYNC,
+        COMMENT_SYNC,
+        LEARNING_ANALYSIS,
+    )
+    from apps.worker.handlers_real import (
+        IMAGE_ANALYSIS,
+        RIGHTS_RESEARCH,
+        CLAIM_EXTRACTION,
+        FORMAT_PLANNING,
+        OPPORTUNITY_ANALYSIS,
+    )
+
 
     return {
         "DISCOVERY_SCAN": DISCOVERY_SCAN,
