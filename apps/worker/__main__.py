@@ -16,12 +16,50 @@ from packages.shared.db import SessionLocal
 def build_handlers() -> dict:
     """Job handlers registered as milestones land (Doc 17 order).
     SOURCE_RETRIEVAL reuses the discovery scan for a single source."""
-    from apps.worker.handlers import claim_verification, discovery_scan
+    from apps.worker.handlers_new import (
+    CLAIM_VERIFICATION,
+    DISCOVERY_SCAN,
+    SOURCE_RETRIEVAL,
+    OPPORTUNITY_ANALYSIS,
+    SOURCE_EXTRACTION,
+    SOURCE_CLUSTERING,
+    IMAGE_ANALYSIS,
+    IMAGE_RESEARCH,
+    RIGHTS_RESEARCH,
+    CLAIM_EXTRACTION,
+    ADVERSARIAL_RESEARCH,
+    FORMAT_PLANNING,
+    CONTENT_GENERATION,
+    VISUAL_GENERATION,
+    QC,
+    EXPORT,
+    PUBLICATION,
+    ANALYTICS_SYNC,
+    COMMENT_SYNC,
+    LEARNING_ANALYSIS,
+)
 
     return {
-        "DISCOVERY_SCAN": discovery_scan,
-        "SOURCE_RETRIEVAL": discovery_scan,
-        "CLAIM_VERIFICATION": claim_verification,
+        "DISCOVERY_SCAN": DISCOVERY_SCAN,
+        "SOURCE_RETRIEVAL": SOURCE_RETRIEVAL,
+        "CLAIM_VERIFICATION": CLAIM_VERIFICATION,
+        "OPPORTUNITY_ANALYSIS": OPPORTUNITY_ANALYSIS,
+        "SOURCE_EXTRACTION": SOURCE_EXTRACTION,
+        "SOURCE_CLUSTERING": SOURCE_CLUSTERING,
+        "IMAGE_ANALYSIS": IMAGE_ANALYSIS,
+        "IMAGE_RESEARCH": IMAGE_RESEARCH,
+        "RIGHTS_RESEARCH": RIGHTS_RESEARCH,
+        "CLAIM_EXTRACTION": CLAIM_EXTRACTION,
+        "ADVERSARIAL_RESEARCH": ADVERSARIAL_RESEARCH,
+        "FORMAT_PLANNING": FORMAT_PLANNING,
+        "CONTENT_GENERATION": CONTENT_GENERATION,
+        "VISUAL_GENERATION": VISUAL_GENERATION,
+        "QC": QC,
+        "EXPORT": EXPORT,
+        "PUBLICATION": PUBLICATION,
+        "ANALYTICS_SYNC": ANALYTICS_SYNC,
+        "COMMENT_SYNC": COMMENT_SYNC,
+        "LEARNING_ANALYSIS": LEARNING_ANALYSIS
     }
 
 
