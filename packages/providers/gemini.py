@@ -55,7 +55,7 @@ class GeminiProvider:
     # --- ProviderAdapter ---------------------------------------------------
 
     def call(self, capability_key: str, payload: dict[str, Any]) -> dict[str, Any]:
-        if capability_key != "llm.generate":
+        if capability_key not in ("llm.generate", "llm.vision"):
             raise ProviderError(f"gemini does not implement capability {capability_key!r}")
         return self.generate(
             prompt=str(payload.get("prompt", "")),
@@ -63,6 +63,7 @@ class GeminiProvider:
             json_schema=payload.get("json_schema"),
             temperature=float(payload.get("temperature", 0.7)),
             max_output_tokens=int(payload.get("max_output_tokens", 2048)),
+            images=payload.get("images"),
         )
 
     # --- capability ---------------------------------------------------------
@@ -75,6 +76,7 @@ class GeminiProvider:
         json_schema: dict[str, Any] | None = None,
         temperature: float = 0.7,
         max_output_tokens: int = 2048,
+        images: list[dict[str, str]] | None = None,
     ) -> dict[str, Any]:
         if not self._api_key:
             raise ProviderUnavailable("gemini: no API key configured")
@@ -89,8 +91,18 @@ class GeminiProvider:
             generation_config["responseMimeType"] = "application/json"
             generation_config["responseSchema"] = json_schema
 
+        parts: list[dict[str, Any]] = [{"text": prompt}]
+        for image in images or []:
+            parts.append(
+                {
+                    "inline_data": {
+                        "mime_type": str(image.get("mime_type", "image/png")),
+                        "data": str(image.get("data_base64", "")),
+                    }
+                }
+            )
         body: dict[str, Any] = {
-            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
+            "contents": [{"role": "user", "parts": parts}],
             "generationConfig": generation_config,
         }
         if system:

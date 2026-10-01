@@ -32,10 +32,54 @@ def _settings():
 # ---------------------------------------------------------------------------
 # IMAGE_ANALYSIS
 # ---------------------------------------------------------------------------
+def _vision_provider():
+    """Factory kept separate so tests can inject a fake provider."""
+    from packages.providers.gemini import GeminiProvider
+
+    return GeminiProvider()
+
+
+def _asset_content(session, asset: Asset) -> bytes:
+    """Read asset bytes with the same path-safety guards as ContentService
+    (relative path inside asset_root, no symlink, no traversal) plus a
+    SHA-256 integrity check against the stored file_hash."""
+    import hashlib
+
+    from packages.shared.settings import get_settings
+
+    if not asset.storage_path:
+        raise FatalJobError("asset has no storage_path")
+    relative_path = Path(asset.storage_path)
+    if relative_path.is_absolute() or ".." in relative_path.parts:
+        raise FatalJobError("asset storage path is invalid")
+    asset_root = Path(get_settings().asset_root).resolve()
+    source_path = asset_root / relative_path
+    if source_path.is_symlink():
+        raise FatalJobError("asset storage path cannot be a symlink")
+    try:
+        resolved = source_path.resolve(strict=True)
+        if not resolved.is_relative_to(asset_root):
+            raise FatalJobError("asset storage path is outside asset storage")
+        content = resolved.read_bytes()
+    except FileNotFoundError as exc:
+        raise FatalJobError("asset file is unavailable") from exc
+    if asset.file_hash:
+        digest = hashlib.sha256(content).hexdigest()
+        if digest != asset.file_hash:
+            raise FatalJobError("asset file hash mismatch (corrupted storage)")
+    return content
+
+
 def image_analysis(
     ctx: ExecutionContext, payload: dict[str, Any], progress: JobProgress
 ) -> dict:
-    """Analyze image assets for duplicate detection and visual classification.
+    """Analyze image assets (Doc 10): SHA-256 integrity check, perceptual
+    hash (duplicate detection), and an AI-PROPOSED visual classification.
+
+    Doc 10 absolute rule: visual similarity never proves identity — hashes
+    support duplicate detection and origin leads only. The classification is
+    recorded on the asset as a proposal (provider provenance stays in the
+    job result); it is never a rights decision.
 
     Expected payload keys:
       - asset_ids: list[str]
@@ -46,9 +90,13 @@ def image_analysis(
 
     progress.next("load_assets")
     with SessionLocal() as session:
+        from agents import vision as vision_agent
+        from packages.providers.gemini import ProviderUnavailable
+        from packages.research.photos import detect_mime, perceptual_hash
+
         assets = session.scalars(
             select(Asset).where(
-                Asset.id.in_(asset_ids),
+                Asset.id.in_([uuid.UUID(str(a)) for a in asset_ids]),
                 Asset.workspace_id == ctx.workspace_id,
                 Asset.profile_id == ctx.profile_id,
             )
@@ -59,14 +107,59 @@ def image_analysis(
         progress.next("analyze")
         results = []
         for asset in assets:
-            # Mark as analyzed — real implementation would run perceptual hash,
-            # classification, etc. Here we only log and succeed.
-            logger.debug("Analyze asset %s", asset.id)
-            results.append({"asset_id": str(asset.id), "status": "analyzed"})
+            content = _asset_content(session, asset)
+
+            mime = detect_mime(content)
+            if mime is None:
+                raise FatalJobError(
+                    f"asset {asset.id}: content is not a decodable image (fail closed)"
+                )
+
+            phash = perceptual_hash(content)
+            duplicate_of = None
+            if phash:
+                twin = session.scalars(
+                    select(Asset).where(
+                        Asset.perceptual_hash == phash,
+                        Asset.id != asset.id,
+                        Asset.workspace_id == ctx.workspace_id,
+                        Asset.profile_id == ctx.profile_id,
+                    )
+                ).first()
+                if twin is not None:
+                    duplicate_of = str(twin.id)
+
+            try:
+                proposal = vision_agent.classify_image(
+                    _vision_provider(), content=content, mime_type=mime
+                )
+            except vision_agent.VisionBlocked as exc:
+                raise FatalJobError(f"asset {asset.id}: {exc}") from exc
+            except ProviderUnavailable as exc:
+                raise RetryableJobError(
+                    f"vision provider unavailable: {exc}"
+                ) from exc
+
+            asset.perceptual_hash = phash or asset.perceptual_hash
+            asset.visual_classification = proposal["visual_classification"]
+            results.append(
+                {
+                    "asset_id": str(asset.id),
+                    "sha256_ok": True,
+                    "perceptual_hash": phash,
+                    "duplicate_of": duplicate_of,
+                    "ai_classification": proposal,
+                }
+            )
 
         session.commit()
         progress.done("analyze")
-    return {"analyzed": len(results), "assets": results}
+    return {
+        "analyzed": len(results),
+        "assets": results,
+        "classification_is_proposal": True,
+    }
+
 
 IMAGE_ANALYSIS = image_analysis
 
