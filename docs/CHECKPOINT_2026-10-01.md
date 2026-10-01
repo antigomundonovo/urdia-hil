@@ -2,7 +2,7 @@
 
 **Branch:** `antigomundonovo-continuar-projeto` · **Repositório:** `antigomundonovo/urdia-hil`
 **Caminho local:** `C:\urdia-hil` (único clone; antigos removidos)
-**Estado:** ruff 100% limpo · **348 testes passando, 0 falhas** · local = GitHub (`255a654`+)
+**Estado:** ruff 100% limpo · **366 testes passando, 0 falhas** · local = GitHub (`9aaf2ae`+)
 **CI:** roda em push/PR para `main` (testes + benchmarks + web). Trabalho diário validado localmente; pipeline formal via PR para main.
 
 ---
@@ -20,6 +20,7 @@
 | M19 | Visão + fila | `d4718af` | IMAGE_ANALYSIS multimodal real (Doc 10) + `urdia-enqueue` CLI |
 | — | Emenda 011 | `0ed8a7a` | Plataformas definitivas (7 redes; Kwai in; Pinterest/LinkedIn/Reddit out) |
 | — | Capacidades + kit manual | `255a654` | Catálogo pesquisado (API vs MANUAL) + `MANUAL_POSTING.md` no export |
+| — | Emenda 012: BRAIN + YouTube | `9aaf2ae` | Skills modulares + recipes determinísticas + YouTubeAdapter (yt-dlp) |
 
 ## 2. Estado do worker (fila de jobs)
 
@@ -41,6 +42,18 @@ docstring (`apps/worker/handlers_new.py`):
   pendente — obrigatório antes de trocar provider). Segurança: chave nunca em
   log/erro/repr (testado); saída do modelo = untrusted data → schema + gate
   semântico (só claims anexados com veredito POSSIBLE/PROBABLE/CONFIRMED).
+
+## 2b. URDIA BRAIN (Emenda 012 — `docs/BRAIN.md`)
+
+Executor determinístico de recipes sobre camada de skills com contrato:
+**7 skills ativas** (research, factuality, scripting, image_inspection,
+platform_policy, publication, analytics — todas delegando a handlers
+existentes) + **3 declaradas** (visual_direction, seo, music — com motivo).
+Recipes: `prepare_publication` (scripting opcional → gate → export PENDING),
+`factuality_audit`, `research_sweep`. Human Gate intransponível; seleção de
+skills por LLM só com benchmark + approval. YouTube virou fonte do discovery
+(`yt-dlp`: metadados + legendas, nunca vídeo; cookies opcionais do operador:
+`YTDLP_COOKIES_FROM_BROWSER`/`_FILE` — YouTube exige sessão p/ metadados).
 
 ## 3. Plataformas (Emenda 011 + matriz 2026)
 
@@ -79,10 +92,12 @@ fontes) · HANDOFF 2026-09-30 marcado como superado (aponta para este checkpoint
 
 ## 6. Próximos passos (sem intervenção humana)
 
-1. ADVERSARIAL_RESEARCH assistido: propostas de contradição (IA) para revisão humana.
-2. Smoke test E2E de CONTENT_GENERATION com a chave real (custo mínimo).
-3. Benchmarks dos providers LLM (pré-requisito para qualquer troca futura).
+1. ADVERSARIAL_RESEARCH assistido: propostas de contradição (IA) para revisão humana
+   (pode virar skill `factuality` avançada).
+2. Benchmarks dos providers LLM (pré-requisito para qualquer troca futura).
+3. Testar YouTubeAdapter com cookies do operador (YouTube exige sessão).
 4. PR/merge para `main` quando o dono quiser validar no CI.
+5. Ajuste fino de recipes conforme uso real do Brain pelo dono.
 
 ## 7. Lote humano (acumulado — para o final, como combinado)
 
