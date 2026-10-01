@@ -1,5 +1,11 @@
 # URDIA HIL — checkpoint geral para continuidade
 
+> ⚠️ **SUPERADO (2026-10-01):** este handoff descreve o estado de 2026-09-30
+> (commit `4170b2e`), inclusive o caminho local antigo
+> (`copilot-worktrees/...`, hoje `C:\urdia-hil`). A referência atual de
+> continuidade é **[`docs/CHECKPOINT_2026-10-01.md`](CHECKPOINT_2026-10-01.md)**.
+> Mantido como histórico.
+
 **Atualizado em:** 2026-09-30  
 **Branch de trabalho:** `antigomundonovo-continuar-projeto`  
 **Commit no momento deste checkpoint:** `4170b2e2bb3f385344a48978f4ff92660d88f039`  

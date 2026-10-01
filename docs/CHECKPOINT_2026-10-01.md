@@ -1,66 +1,96 @@
-# Checkpoint Geral — 2026-10-01 (pós-review completo)
+# Checkpoint Geral — 2026-10-01 (consolidado, pós LLM + plataformas)
 
-**Branch:** `antigomundonovo-continuar-projeto`
-**Repositório:** `antigomundonovo/urdia-hil`
-**Estado:** ruff 100% limpo · **311 testes passando, 0 falhas** · local = GitHub
-
----
-
-## 1. Review completo executado nesta sessão
-
-### Correções de qualidade (lint)
-- `packages/rendering/engine.py` — 3 linhas >100 chars reformatadas (chamadas `_draw_text_block` quebradas em argumentos múltiplos).
-- `packages/rendering/qc.py` — assinatura de `render_metadata_block` quebrada em múltiplas linhas.
-- `packages/research/content.py` — lista de subpastas do export reformatada; `zip(specs, CAROUSEL_SLIDES, strict=True)` adicionado (B905: contrato explícito de 7 slides); caminho do slide unificado em `path`.
-- `tests/test_job_handlers.py` — reescrito: import no topo (E402), registro cobre todos os JobTypes, stubs OK com payload vazio, reais fail-closed sem ids.
-- `tests/test_job_handlers_real.py` — linha >100 corrigida;`DummySession` restaura `add()` usado pelo `append_audit`.
-- `apps/worker/handlers_real.py` — variáveis não usadas removidas (`service`, `rights_service`, `knowledge`), imports órfãos removidos (`PhotoService`, `RightsService`, `KnowledgeService`, `_get_settings`), linhas longas reformatadas.
-
-### Bugs reais encontrados e corrigidos
-1. **Path duplicado no export do carousel** (`carousel/carousel/slide-01-...png`): a linha de escrita somava `"carousel"` duas vezes — render falhava com 409 no export CAROUSEL. Corrigido para `export_dir / path`.
-2. **Worker registrava stubs no lugar de handlers reais**: `build_handlers()` mapeava `DISCOVERY_SCAN`, `SOURCE_RETRIEVAL` e `CLAIM_VERIFICATION` para no-ops, enquanto as implementações de produção existiam em `apps/worker/handlers.py` (só usadas por testes). Corrigido: produção usa os handlers reais.
-3. **`DummySession` sem `add()`** fazia `append_audit` quebrar nos testes do JobEngine — restaurado.
-
-### Limpeza / dependências
-- `handlers_new.py` enxuto: apenas os 12 stubs restantes (os 3 duplicados com handlers reais foram removidos).
-- Verificação de dependências do `pyproject.toml`: nenhuma a remover. Uvicorn (servidor), Alembic (migrations CLI), psycopg (driver Postgres) e pgvector (extensão vetorial Doc 05) são infraestrutura sem import direto — todos necessários.
-- Nenhum arquivo órfão rastreado; caches (`.pytest_cache`, `.ruff_cache`, `__pycache__`, `urdia_hil.egg-info`) não são versionados.
+**Branch:** `antigomundonovo-continuar-projeto` · **Repositório:** `antigomundonovo/urdia-hil`
+**Caminho local:** `C:\urdia-hil` (único clone; antigos removidos)
+**Estado:** ruff 100% limpo · **348 testes passando, 0 falhas** · local = GitHub (`255a654`+)
+**CI:** roda em push/PR para `main` (testes + benchmarks + web). Trabalho diário validado localmente; pipeline formal via PR para main.
 
 ---
 
-## 2. Registro de handlers (estado final)
+## 1. Milestones entregues (histórico consolidado)
 
-| JobType | Implementação |
-|---|---|
-| DISCOVERY_SCAN / SOURCE_RETRIEVAL | `handlers.py` (real: DiscoveryEngine + SafeFetcher) |
-| CLAIM_VERIFICATION | `handlers.py` (real: vereditos determinísticos Doc 16) |
-| IMAGE_ANALYSIS | `handlers_real.py` (valida payload; análise plena pende do wiring de analyzers) |
-| RIGHTS_RESEARCH | `handlers_real.py` (nunca degrada para public domain — Doc 11) |
-| CLAIM_EXTRACTION | `handlers_real.py` (extração plena pende do parser de conteúdo) |
-| FORMAT_PLANNING | `handlers_real.py` (conjunto fechado V1 — Emenda 006) |
-| OPPORTUNITY_ANALYSIS | `handlers_real.py` (opportunity_ids opcional) |
-| 12 restantes (SOURCE_EXTRACTION, SOURCE_CLUSTERING, IMAGE_RESEARCH, ADVERSARIAL_RESEARCH, CONTENT_GENERATION, VISUAL_GENERATION, QC, EXPORT, PUBLICATION, ANALYTICS_SYNC, COMMENT_SYNC, LEARNING_ANALYSIS) | stubs no-op em `handlers_new.py` |
+| # | Marco | Commit | Resumo |
+|---|---|---|---|
+| M13 | Benchmarks Doc 16 | `afebd8a` | 140 casos (61 pytest + 79 script); rights gate fail-closed; SSRF; isolamento |
+| M14 | Renderizador Doc 13 | `b68f2b3` | Pillow determinístico: PHOTO_POST + CAROUSEL (7 slides), QC, manifest `render` |
+| M15 | Handlers JobEngine | `242697b` | 5 handlers reais (IMAGE_ANALYSIS, RIGHTS_RESEARCH, CLAIM_EXTRACTION, FORMAT_PLANNING, OPPORTUNITY_ANALYSIS) |
+| M16 | Full review | `bac0487` | 2 bugs reais corrigidos (path duplicado no carousel; stubs no lugar de handlers reais); lint 100% |
+| M17 | Worker 16/20 | `cb4df39` | QC, EXPORT, ANALYTICS_SYNC, COMMENT_SYNC, LEARNING_ANALYSIS reais |
+| M18 | **LLM integrado** | `aafc32d` | GeminiProvider + agente Copywriter + CONTENT_GENERATION; prompt v1 versionado; gate semântico |
+| M19 | Visão + fila | `d4718af` | IMAGE_ANALYSIS multimodal real (Doc 10) + `urdia-enqueue` CLI |
+| — | Emenda 011 | `0ed8a7a` | Plataformas definitivas (7 redes; Kwai in; Pinterest/LinkedIn/Reddit out) |
+| — | Capacidades + kit manual | `255a654` | Catálogo pesquisado (API vs MANUAL) + `MANUAL_POSTING.md` no export |
 
-Fail-closed garantido: payload sem os ids obrigatórios → `FatalJobError` → job FAILED, sem retry (Doc 03).
+## 2. Estado do worker (fila de jobs)
 
----
+**14/20 job types com handler real**; 6 stubs com justificativa de spec no
+docstring (`apps/worker/handlers_new.py`):
 
-## 3. Milestones já consolidados (histórico)
+- **Reais:** DISCOVERY_SCAN, SOURCE_RETRIEVAL*, CLAIM_VERIFICATION
+  (`handlers.py` — produção) · IMAGE_ANALYSIS, RIGHTS_RESEARCH,
+  CLAIM_EXTRACTION, FORMAT_PLANNING, OPPORTUNITY_ANALYSIS, QC, EXPORT,
+  ANALYTICS_SYNC, COMMENT_SYNC, LEARNING_ANALYSIS, CONTENT_GENERATION
+  (`handlers_real.py`) · *SOURCE_RETRIEVAL compartilha o handler do scan.
+- **Stubs (por quê):** SOURCE_EXTRACTION/SOURCE_CLUSTERING (scan cobre),
+  IMAGE_RESEARCH/ADVERSARIAL_RESEARCH (APIs de busca externas — lote humano),
+  VISUAL_GENERATION (render roda no export), PUBLICATION (Emenda 007: manual-confirm).
+- **Operação:** `urdia-enqueue --type X --workspace … --profile … [--payload '{…}']`
+  · fail-closed sem ids (FatalJobError, sem retry) · provider indisponível → requeue.
+- **LLM (Gemini):** `GOOGLE_AI_API_KEY` no `.env` (validada); modelo default
+  `gemini-2.5-flash` (`LLM_MODEL`); registry em `docs/PROVIDERS.md` (benchmark
+  pendente — obrigatório antes de trocar provider). Segurança: chave nunca em
+  log/erro/repr (testado); saída do modelo = untrusted data → schema + gate
+  semântico (só claims anexados com veredito POSSIBLE/PROBABLE/CONFIRMED).
 
-- **M13** — Benchmarks Doc 16: 140 casos (61 pytest + 79 scripts/benchmark.py).
-- **M14** — Renderizador determinístico Doc 13 (PHOTO_POST + CAROUSEL, QC, manifest com `render` block).
-- **M15** — Handlers reais do JobEngine para 5 JobTypes + cobertura de registro.
+## 3. Plataformas (Emenda 011 + matriz 2026)
 
----
+**Instagram · Facebook · X (Twitter) · YouTube · TikTok · Threads · Kwai**
+(saiem do escopo: Pinterest, LinkedIn, Reddit).
 
-## 4. Próximos passos (sem intervenção humana)
+| Rede | Método-alvo | Observação |
+|---|---|---|
+| Instagram/Facebook/Threads | API | Graph API; limites no catálogo |
+| X | API | pay-per-use (~US$0,015/post; US$0,20 c/ link) |
+| TikTok | API | Direct Post exige auditoria de app (senão sai privado) |
+| YouTube | API (vídeo) | ~6 uploads/dia no quota default; Community posts → MANUAL |
+| Kwai | MANUAL | sem API oficial (confirmado 2026-10-01) |
 
-1. Substituir stubs restantes por implementações reais conforme a ordem do Doc 17.
-2. Completar IMAGE_ANALYSIS com o pass de perceptual-hash/dedupe (analyzers já existem).
-3. Runbook do worker (Docker/K8s) em `docs/RUNBOOK.md`.
+**Política do dono (implementada):** API → publica direto **após aprovação
+humana** (Emenda 007); sem API → export gera `platform_variants/<rede>/MANUAL_POSTING.md`
+completo (texto, mídias, hashtags, rastreabilidade, passos + rota de confirmação).
+Catálogo: `packages/providers/platform_catalog.py` (descriptors declarados;
+registry de adapters permanece vazio até credenciais + teste de revogação).
+Detalhes/fontes: `docs/PLATFORM_CAPABILITIES.md`.
 
-## 5. Lote humano (acumulado para o final — instrução do usuário)
+## 4. Correções recentes que valem lembrar
 
-1. Chaves LLM (Google AI Studio) — desbloqueia agentes de geração.
-2. 3–10 casos históricos reais para benchmarks.
-3. Decisões de emendas pendentes (001–004 pré-definidas).
+- Export do carousel gravava em `carousel/carousel/` (path duplicado) — corrigido.
+- `build_handlers` registrava stubs para jobs com implementação real — corrigido.
+- Mudança de PlatformPlan invalida QC (Doc 14) — comportamento confirmado em teste
+  (re-rodar QC antes de exportar; approve persiste no audit).
+- Formato das chaves do Google AI Studio mudou (`AQ.A…` ~53 chars, não mais
+  `AIza…`) — validar contra a API real, nunca por formato (memória salva).
+
+## 5. Documentação atualizada hoje
+
+README (LLM opcional, worker/fila, redes) · RUNBOOK (seção urdia-enqueue) ·
+`docs/PROVIDERS.md` (registro §15) · `docs/PLATFORM_CAPABILITIES.md` (matriz com
+fontes) · HANDOFF 2026-09-30 marcado como superado (aponta para este checkpoint).
+
+## 6. Próximos passos (sem intervenção humana)
+
+1. ADVERSARIAL_RESEARCH assistido: propostas de contradição (IA) para revisão humana.
+2. Smoke test E2E de CONTENT_GENERATION com a chave real (custo mínimo).
+3. Benchmarks dos providers LLM (pré-requisito para qualquer troca futura).
+4. PR/merge para `main` quando o dono quiser validar no CI.
+
+## 7. Lote humano (acumulado — para o final, como combinado)
+
+1. **3–10 casos históricos reais** para benchmarks (lista simples de fatos + fontes).
+2. **Aprovação das emendas 001–004** (já pré-definidas; "sim/não" rápidos).
+3. Quando quiser publicação por API: credenciais por rede (app Meta Business,
+   conta X dev com créditos, TikTok com auditoria, Google Cloud OAuth) — uma a uma.
+
+> Nota: novas integrações de ferramentas serão analisadas caso a caso contra a
+> constituição (Doc 17 Core Rule + §14/§15) — nada de Frankenstein: cada
+> adição passa por spec → emenda se preciso → benchmark → testes.

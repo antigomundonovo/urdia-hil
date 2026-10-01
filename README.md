@@ -110,6 +110,39 @@ Health check: `GET /api/v1/health`
 
 Diagnóstico operacional: `python -m scripts.doctor` (ou `urdia-doctor`) imprime o ambiente e a URL do banco com senha mascarada para validar o bootstrap sem expor segredos em logs.
 
+## Geração assistida (LLM opcional)
+
+Configure `GOOGLE_AI_API_KEY` no `.env` (Google AI Studio) para habilitar a
+geração assistida de rascunhos (agente Copywriter, Gemini) e a análise visual
+de imagens. A saída do LLM é sempre uma **proposta**: passa por validação de
+schema, gate semântico determinístico (só claims anexados e verificados), QC
+e aprovação humana antes de qualquer publicação. Provider/modelo registrados
+em [`docs/PROVIDERS.md`](docs/PROVIDERS.md); troca exige benchmark (Doc 17 §9/§15).
+
+## Worker e fila de jobs
+
+```bash
+python -m apps.worker            # residente: processa a fila continuamente
+python -m apps.worker --once     # processa um ciclo e sai (CI/testes)
+urdia-enqueue --type DISCOVERY_SCAN --workspace <uuid> --profile <uuid>
+urdia-enqueue --list             # 20 jobs mais recentes
+```
+
+Jobs são criados por rotinas internas e pela ferramenta de operação
+`urdia-enqueue` (a constituição não expõe endpoint público de criação).
+Cada job carrega checkpoint e retry classificado (Doc 03); jobs `RUNNING`
+órfãos são reenfileirados no restart.
+
+## Publicação (redes sociais)
+
+Redes oficiais (AMENDMENT-011): **Instagram, Facebook, X (Twitter), YouTube,
+TikTok, Threads, Kwai**. Política: rede com API oficial publica direto da
+URDIA — **sempre após aprovação humana**; rede sem API (Kwai; posts de
+comunidade do YouTube) recebe um **kit de postagem manual completo** no
+export (`platform_variants/<rede>/MANUAL_POSTING.md`) e a publicação é
+confirmada no sistema depois de feita. Matriz de capacidades e requisitos:
+[`docs/PLATFORM_CAPABILITIES.md`](docs/PLATFORM_CAPABILITIES.md).
+
 ## Conta e sessão
 
 Na interface, crie uma conta com e-mail e senha de pelo menos 12 caracteres.
