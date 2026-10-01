@@ -222,18 +222,36 @@ def render_carousel_slide(spec: SlideSpec, size: tuple[int, int] = DEFAULT_SIZE)
         draw.rectangle((0, panel_top, width, height), fill=panel_color)
         draw.rectangle((0, panel_top, width, panel_top + 8), fill=ACCENT_COLOR)
         bottom = _draw_text_block(
-            draw, lines=lines, font=title_font, x=MARGIN, y=panel_top + MARGIN // 2, max_width=max_width, color=text_color
+            draw,
+            lines=lines,
+            font=title_font,
+            x=MARGIN,
+            y=panel_top + MARGIN // 2,
+            max_width=max_width,
+            color=text_color,
         )
         if body_lines:
             bottom = _draw_text_block(
-                draw, lines=body_lines, font=body_font, x=MARGIN, y=bottom + 16, max_width=max_width, color=text_color
+                draw,
+                lines=body_lines,
+                font=body_font,
+                x=MARGIN,
+                y=bottom + 16,
+                max_width=max_width,
+                color=text_color,
             )
         overflow = bottom > height - MARGIN // 4
     else:
         top = MARGIN
         draw.rectangle((MARGIN, top, MARGIN + 96, top + 10), fill=ACCENT_COLOR)
         cursor = _draw_text_block(
-            draw, lines=[spec.role], font=label_font, x=MARGIN, y=top + 32, max_width=max_width, color=ACCENT_COLOR
+            draw,
+            lines=[spec.role],
+            font=label_font,
+            x=MARGIN,
+            y=top + 32,
+            max_width=max_width,
+            color=ACCENT_COLOR,
         )
         if spec.heading:
             cursor = _draw_text_block(

@@ -778,7 +778,15 @@ class ContentService:
         date_part = datetime.now(UTC).strftime("%Y-%m-%d")
         short_id = str(package.id)[:8]
         export_dir = self.export_root / f"post-{date_part}-{short_id}"
-        for sub in ("image", "carousel", "microloop", "captions", "sources", "rights", "platform_variants"):
+        for sub in (
+            "image",
+            "carousel",
+            "microloop",
+            "captions",
+            "sources",
+            "rights",
+            "platform_variants",
+        ):
             (export_dir / sub).mkdir(parents=True, exist_ok=True)
         (export_dir / "manifest.json").unlink(missing_ok=True)
 
@@ -1117,7 +1125,7 @@ class ContentService:
             raise PublicationBlocked("draft has no text to render")
 
         try:
-            rendered: list[tuple[str, "render_engine.RenderedSlide", dict[str, str]]] = []
+            rendered: list[tuple[str, render_engine.RenderedSlide, dict[str, str]]] = []
             if package.format == ContentFormat.PHOTO_POST.value:
                 # Doc 13 ANM default: image-first, little text on the art —
                 # only the hook goes on the image; the full caption ships in
@@ -1159,11 +1167,13 @@ class ContentService:
                     first_image=first_asset_bytes,
                     claim_texts=claim_texts,
                 )
-                for index, (spec, role) in enumerate(zip(specs, render_engine.CAROUSEL_SLIDES), start=1):
+                for index, (spec, role) in enumerate(
+                    zip(specs, render_engine.CAROUSEL_SLIDES, strict=True), start=1
+                ):
                     slide = render_engine.render_carousel_slide(spec)
                     slug = role.lower().replace(" / ", "-").replace(" ", "-")
                     path = f"carousel/slide-{index:02d}-{slug}.png"
-                    (export_dir / "carousel" / f"slide-{index:02d}-{slug}.png").write_bytes(slide.png)
+                    (export_dir / path).write_bytes(slide.png)
                     rendered.append(
                         (
                             path,

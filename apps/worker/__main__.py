@@ -15,37 +15,39 @@ from packages.shared.db import SessionLocal
 
 def build_handlers() -> dict:
     """Job handlers registered as milestones land (Doc 17 order).
-    SOURCE_RETRIEVAL reuses the discovery scan for a single source."""
+
+    Real implementations win over stubs: DISCOVERY_SCAN, SOURCE_RETRIEVAL and
+    CLAIM_VERIFICATION use the production handlers (apps.worker.handlers);
+    five more use handlers_real; the remaining job types stay on no-op stubs
+    until their milestone wiring lands.
+    """
+    from apps.worker import handlers
     from apps.worker.handlers_new import (
-        CLAIM_VERIFICATION,
-        DISCOVERY_SCAN,
-        SOURCE_RETRIEVAL,
-        SOURCE_EXTRACTION,
-        SOURCE_CLUSTERING,
-        IMAGE_RESEARCH,
         ADVERSARIAL_RESEARCH,
-        CONTENT_GENERATION,
-        VISUAL_GENERATION,
-        QC,
-        EXPORT,
-        PUBLICATION,
         ANALYTICS_SYNC,
         COMMENT_SYNC,
+        CONTENT_GENERATION,
+        EXPORT,
+        IMAGE_RESEARCH,
         LEARNING_ANALYSIS,
+        PUBLICATION,
+        QC,
+        SOURCE_CLUSTERING,
+        SOURCE_EXTRACTION,
+        VISUAL_GENERATION,
     )
     from apps.worker.handlers_real import (
-        IMAGE_ANALYSIS,
-        RIGHTS_RESEARCH,
         CLAIM_EXTRACTION,
         FORMAT_PLANNING,
+        IMAGE_ANALYSIS,
         OPPORTUNITY_ANALYSIS,
+        RIGHTS_RESEARCH,
     )
 
-
     return {
-        "DISCOVERY_SCAN": DISCOVERY_SCAN,
-        "SOURCE_RETRIEVAL": SOURCE_RETRIEVAL,
-        "CLAIM_VERIFICATION": CLAIM_VERIFICATION,
+        "DISCOVERY_SCAN": handlers.discovery_scan,
+        "SOURCE_RETRIEVAL": handlers.discovery_scan,
+        "CLAIM_VERIFICATION": handlers.claim_verification,
         "OPPORTUNITY_ANALYSIS": OPPORTUNITY_ANALYSIS,
         "SOURCE_EXTRACTION": SOURCE_EXTRACTION,
         "SOURCE_CLUSTERING": SOURCE_CLUSTERING,

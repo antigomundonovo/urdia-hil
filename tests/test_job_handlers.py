@@ -1,24 +1,40 @@
-"""Integration tests for the stub job handlers.
+"""Integration tests for the worker handler registry (``build_handlers``).
 
-The tests create a minimal in‑memory DB session via ``SessionLocal`` and use the
-``JobEngine`` with the mapping from ``build_handlers``.  They only check that a
-job can be claimed, executed, and ends in ``SUCCEEDED`` and that the checkpoint
-contains the handler name.
+Two behaviours are pinned here:
+
+- STUB handlers (no payload requirements) must succeed on an empty payload;
+- REAL handlers (Doc 17 wiring) validate the payload and FAIL CLOSED on an
+  empty one (FatalJobError -> FAILED), never reporting success without work.
 """
 
-from uuid import uuid4
 from types import SimpleNamespace
+from uuid import uuid4
 
-from apps.worker import engine as worker_engine
-from apps.worker.engine import JobEngine, JobProgress, JOB_SUCCEEDED
+from apps.worker.__main__ import build_handlers
+from apps.worker.engine import JOB_FAILED, JOB_SUCCEEDED, JobEngine
 from packages.domain.enums import JobType
-from packages.shared.db import SessionLocal
 
-# Helper to create a very small in‑memory database session that merely records commit
+# Real handlers that REQUIRE domain ids in the payload; an empty payload is a
+# schema error and must fail closed (Doc 03 non-retryable). OPPORTUNITY_ANALYSIS
+# intentionally accepts an empty payload: opportunity_ids is optional and
+# defaults to "all opportunities in the profile".
+REAL_HANDLERS_REQUIRING_IDS = {
+    "DISCOVERY_SCAN",
+    "SOURCE_RETRIEVAL",
+    "CLAIM_VERIFICATION",
+    "IMAGE_ANALYSIS",
+    "RIGHTS_RESEARCH",
+    "CLAIM_EXTRACTION",
+    "FORMAT_PLANNING",
+}
+REAL_HANDLERS = REAL_HANDLERS_REQUIRING_IDS | {"OPPORTUNITY_ANALYSIS"}
+
+
 class DummySession:
+    """Minimal stand-in: JobEngine needs flush/commit/add (append_audit)."""
+
     def __init__(self):
         self.commits = 0
-        self.items = []
 
     def flush(self):
         pass
@@ -26,27 +42,13 @@ class DummySession:
     def commit(self):
         self.commits += 1
 
-    def scalars(self, stmt):
-        return []
+    def add(self, obj):
+        pass
 
     def get(self, model, key):
         return None
 
-    def add(self, obj):
-        self.items.append(obj)
 
-    def scalar(self, stmt):
-        return None
-
-    def close(self):
-        pass
-
-# Build the handlers from __main__ (now includes all stubs)
-from apps.worker.__main__ import build_handlers
-
-handlers = build_handlers()
-
-# Create a dummy job for each JobType
 def make_job(jt: str):
     return SimpleNamespace(
         id=uuid4(),
@@ -64,11 +66,31 @@ def make_job(jt: str):
     )
 
 
-def test_all_handlers_can_run():
-    session = DummySession()
-    engine = JobEngine(session, handlers)
-    for jt in JobType.__members__.keys():
+def test_registry_covers_every_job_type():
+    """Every JobType enum value has a registered handler (Doc 03 contract)."""
+    handlers = build_handlers()
+    for jt in JobType:
+        assert jt.value in handlers, f"{jt.value} has no registered handler"
+
+
+def test_stub_handlers_succeed_on_empty_payload():
+    handlers = build_handlers()
+    engine = JobEngine(DummySession(), handlers)
+    for jt in JobType:
+        if jt.value in REAL_HANDLERS:
+            continue
+        job = make_job(jt.value)
+        result = engine.run_job(job)
+        assert result.status == JOB_SUCCEEDED, f"{jt.value} failed: {job.error}"
+        assert result.checkpoint["completed_steps"], f"{jt.value} missing checkpoint"
+
+
+def test_real_handlers_fail_closed_on_empty_payload():
+    """Empty payload is a schema error: FAILED, audited, never SUCCEEDED."""
+    handlers = build_handlers()
+    engine = JobEngine(DummySession(), handlers)
+    for jt in sorted(REAL_HANDLERS_REQUIRING_IDS):
         job = make_job(jt)
-        res_job = engine.run_job(job)
-        assert res_job.status == JOB_SUCCEEDED, f"{jt} failed"
-        assert res_job.checkpoint["completed_steps"], f"{jt} missing checkpoint"
+        result = engine.run_job(job)
+        assert result.status == JOB_FAILED, f"{jt} unexpectedly succeeded"
+        assert result.error, f"{jt} failed without an error message"

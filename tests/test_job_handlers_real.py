@@ -3,11 +3,11 @@
 These tests exercise the handlers with a dummy in‑memory job engine.
 """
 
-from uuid import uuid4
 from types import SimpleNamespace
+from uuid import uuid4
 
-from apps.worker.engine import JobEngine, JOB_SUCCEEDED
 from apps.worker.__main__ import build_handlers
+from apps.worker.engine import JobEngine
 
 
 class DummySession:
@@ -54,11 +54,20 @@ def make_job(jt: str):
     )
 
 
+REAL_JOB_TYPES = (
+    "IMAGE_ANALYSIS",
+    "RIGHTS_RESEARCH",
+    "CLAIM_EXTRACTION",
+    "FORMAT_PLANNING",
+    "OPPORTUNITY_ANALYSIS",
+)
+
+
 def test_real_handlers_accept_job():
     handlers = build_handlers()
     session = DummySession()
     engine = JobEngine(session, handlers)
-    for jt in ["IMAGE_ANALYSIS", "RIGHTS_RESEARCH", "CLAIM_EXTRACTION", "FORMAT_PLANNING", "OPPORTUNITY_ANALYSIS"]:
+    for jt in REAL_JOB_TYPES:
         job = make_job(jt)
         # The handlers will fail with FatalJobError because payload is empty;
         # we just want to check they are reachable.

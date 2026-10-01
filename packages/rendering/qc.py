@@ -115,7 +115,9 @@ def qc_summary(checks: dict[str, str]) -> str:
     return "PASS"
 
 
-def render_metadata_block(slides: list[tuple[str, RenderedSlide, dict[str, str]]]) -> dict[str, Any]:
+def render_metadata_block(
+    slides: list[tuple[str, RenderedSlide, dict[str, str]]],
+) -> dict[str, Any]:
     """Manifest section for rendered files: per-file hash/dimensions + QC."""
     import hashlib
 

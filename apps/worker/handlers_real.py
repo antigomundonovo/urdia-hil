@@ -12,30 +12,21 @@ from typing import Any
 
 from sqlalchemy import select
 
-from apps.worker.engine import FatalJobError, JobProgress, RetryableJobError
+from apps.worker.engine import FatalJobError, JobProgress
 from packages.domain.assets import Asset
-from packages.domain.models import Job, Source
+from packages.domain.models import Source
 from packages.shared.db import SessionLocal
 from packages.shared.execution_context import ExecutionContext
-from packages.research.photos import PhotoService
-from packages.research.rights import RightsService
-from packages.research.verification import KnowledgeService
-from packages.research.opportunity import OpportunityService
-from packages.research.content import ContentService
-from packages.shared.settings import Settings
 
 logger = logging.getLogger(__name__)
-
-
-def _get_settings():
-    from packages.shared.settings import get_settings
-    return get_settings()
 
 
 # ---------------------------------------------------------------------------
 # IMAGE_ANALYSIS
 # ---------------------------------------------------------------------------
-def image_analysis(ctx: ExecutionContext, payload: dict[str, Any], progress: JobProgress) -> dict:
+def image_analysis(
+    ctx: ExecutionContext, payload: dict[str, Any], progress: JobProgress
+) -> dict:
     """Analyze image assets for duplicate detection and visual classification.
 
     Expected payload keys:
@@ -57,9 +48,6 @@ def image_analysis(ctx: ExecutionContext, payload: dict[str, Any], progress: Job
         if not assets:
             raise FatalJobError("no assets found for profile")
 
-        settings = _get_settings()
-        service = PhotoService(session, asset_root=settings.asset_root)
-
         progress.next("analyze")
         results = []
         for asset in assets:
@@ -77,7 +65,9 @@ IMAGE_ANALYSIS = image_analysis
 # ---------------------------------------------------------------------------
 # RIGHTS_RESEARCH
 # ---------------------------------------------------------------------------
-def rights_research(ctx: ExecutionContext, payload: dict[str, Any], progress: JobProgress) -> dict:
+def rights_research(
+    ctx: ExecutionContext, payload: dict[str, Any], progress: JobProgress
+) -> dict:
     """Run rights research for assets and attach classification if missing.
 
     Expected payload keys:
@@ -89,7 +79,6 @@ def rights_research(ctx: ExecutionContext, payload: dict[str, Any], progress: Jo
 
     progress.next("resolve_assets")
     with SessionLocal() as session:
-        rights_service = RightsService(session)
         assets = session.scalars(
             select(Asset).where(
                 Asset.id.in_(asset_ids),
@@ -117,7 +106,9 @@ RIGHTS_RESEARCH = rights_research
 # ---------------------------------------------------------------------------
 # CLAIM_EXTRACTION
 # ---------------------------------------------------------------------------
-def claim_extraction(ctx: ExecutionContext, payload: dict[str, Any], progress: JobProgress) -> dict:
+def claim_extraction(
+    ctx: ExecutionContext, payload: dict[str, Any], progress: JobProgress
+) -> dict:
     """Extract claims from a set of source IDs.
 
     Expected payload keys:
@@ -140,7 +131,6 @@ def claim_extraction(ctx: ExecutionContext, payload: dict[str, Any], progress: J
             raise FatalJobError("no sources found for profile")
 
         progress.next("extract")
-        knowledge = KnowledgeService(session)
         extracted = 0
         for src in sources:
             # Placeholder: real extraction would parse source content.
@@ -156,7 +146,9 @@ CLAIM_EXTRACTION = claim_extraction
 # ---------------------------------------------------------------------------
 # FORMAT_PLANNING
 # ---------------------------------------------------------------------------
-def format_planning(ctx: ExecutionContext, payload: dict[str, Any], progress: JobProgress) -> dict:
+def format_planning(
+    ctx: ExecutionContext, payload: dict[str, Any], progress: JobProgress
+) -> dict:
     """Decide content format for an opportunity.
 
     Expected payload keys:
@@ -169,8 +161,13 @@ def format_planning(ctx: ExecutionContext, payload: dict[str, Any], progress: Jo
     progress.next("load_opportunity")
     with SessionLocal() as session:
         from packages.domain.editorial import Opportunity
+
         opp = session.get(Opportunity, opp_id)
-        if not opp or opp.workspace_id != ctx.workspace_id or opp.profile_id != ctx.profile_id:
+        if (
+            not opp
+            or opp.workspace_id != ctx.workspace_id
+            or opp.profile_id != ctx.profile_id
+        ):
             raise FatalJobError("opportunity not found in profile")
 
         progress.next("plan")
@@ -186,7 +183,9 @@ FORMAT_PLANNING = format_planning
 # ---------------------------------------------------------------------------
 # OPPORTUNITY_ANALYSIS (simple heuristic)
 # ---------------------------------------------------------------------------
-def opportunity_analysis(ctx: ExecutionContext, payload: dict[str, Any], progress: JobProgress) -> dict:
+def opportunity_analysis(
+    ctx: ExecutionContext, payload: dict[str, Any], progress: JobProgress
+) -> dict:
     """Run JEV-style heuristic analysis over opportunities.
 
     Expected payload keys:
@@ -195,6 +194,7 @@ def opportunity_analysis(ctx: ExecutionContext, payload: dict[str, Any], progres
     progress.next("load_opportunities")
     with SessionLocal() as session:
         from packages.domain.editorial import Opportunity
+
         opp_ids = payload.get("opportunity_ids")
         stmt = select(Opportunity).where(
             Opportunity.workspace_id == ctx.workspace_id,
