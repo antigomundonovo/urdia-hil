@@ -24,7 +24,6 @@ def build_handlers() -> dict:
     from apps.worker import handlers
     from apps.worker.handlers_new import (
         ADVERSARIAL_RESEARCH,
-        CONTENT_GENERATION,
         IMAGE_RESEARCH,
         PUBLICATION,
         SOURCE_CLUSTERING,
@@ -35,6 +34,7 @@ def build_handlers() -> dict:
         ANALYTICS_SYNC,
         CLAIM_EXTRACTION,
         COMMENT_SYNC,
+        CONTENT_GENERATION,
         EXPORT,
         FORMAT_PLANNING,
         IMAGE_ANALYSIS,

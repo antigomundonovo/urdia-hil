@@ -44,6 +44,11 @@ class Settings(BaseSettings):
     smtp_starttls: bool = True
     smtp_use_ssl: bool = False
 
+    # LLM provider (Doc 17 §9/§15): key never logged/repr'd (Doc 08).
+    google_ai_api_key: str = Field(default="", repr=False)
+    llm_model: str = "gemini-2.5-flash"
+    llm_timeout_seconds: float = 60.0
+
     @property
     def cors_origin_list(self) -> list[str]:
         """Doc 08: CORS por allowlist, nunca wildcard."""

@@ -10,14 +10,12 @@ as each Doc 17 milestone lands:
   OPPORTUNITY_ANALYSIS / QC / EXPORT / ANALYTICS_SYNC / COMMENT_SYNC /
   LEARNING_ANALYSIS: apps.worker.handlers_real
 
-The 7 remaining stubs below are intentionally NOT implemented in V1
+The 6 remaining stubs below are intentionally NOT implemented in V1
 (Doc 17 Core Rule: no invented features):
 - SOURCE_EXTRACTION / SOURCE_CLUSTERING: covered by the discovery scan;
   a separate pipeline would duplicate it without a spec.
-- IMAGE_RESEARCH / ADVERSARIAL_RESEARCH: require external search/LLM APIs
-  (human batch: API keys).
-- CONTENT_GENERATION: V1 draft text is authored by the human via the API;
-  automated generation needs the LLM provider (human batch).
+- IMAGE_RESEARCH / ADVERSARIAL_RESEARCH: require external search APIs
+  (human batch: search provider registration + benchmark, Doc 17 §15).
 - VISUAL_GENERATION: Doc 13 render runs inside export_package; a standalone
   job would duplicate it without a spec.
 - PUBLICATION: automated publishing violates Amendment 007 / Doc 14 —
@@ -48,6 +46,5 @@ SOURCE_EXTRACTION = _noop_handler("source_extraction")
 SOURCE_CLUSTERING = _noop_handler("source_clustering")
 IMAGE_RESEARCH = _noop_handler("image_research")
 ADVERSARIAL_RESEARCH = _noop_handler("adversarial_research")
-CONTENT_GENERATION = _noop_handler("content_generation")
 VISUAL_GENERATION = _noop_handler("visual_generation")
 PUBLICATION = _noop_handler("publication")

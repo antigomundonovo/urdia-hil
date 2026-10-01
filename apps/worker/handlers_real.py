@@ -14,7 +14,7 @@ from typing import Any
 
 from sqlalchemy import select
 
-from apps.worker.engine import FatalJobError, JobProgress
+from apps.worker.engine import FatalJobError, JobProgress, RetryableJobError
 from packages.domain.assets import Asset
 from packages.domain.models import Source
 from packages.shared.db import SessionLocal
@@ -449,3 +449,92 @@ def learning_analysis(
 
 
 LEARNING_ANALYSIS = learning_analysis
+
+
+# ---------------------------------------------------------------------------
+# CONTENT_GENERATION (LLM-assisted draft proposal — Doc 05 Copywriter)
+# ---------------------------------------------------------------------------
+def _copywriter_provider():
+    """Factory kept separate so tests can inject a fake provider."""
+    from packages.providers.gemini import GeminiProvider
+
+    return GeminiProvider()
+
+
+def content_generation(
+    ctx: ExecutionContext, payload: dict[str, Any], progress: JobProgress
+) -> dict:
+    """Propose a draft for a package via the Copywriter agent (LLM), then
+    persist it through the normal generate_draft flow. The proposal still
+    goes through QC + human review (automation_level 2) — the job NEVER
+    approves or publishes.
+
+    Fail-closed rules (Doc 17 §10 — prompt is not governance):
+      - unusable/invalid model output  -> FatalJobError (invalid schema);
+      - semantic violations (claims not attached/usable) -> FatalJobError
+        (policy block);
+      - provider unavailable/timeout/rate-limit -> RetryableJobError (Doc 03).
+
+    Expected payload keys:
+      - package_id: str
+      - extra_instructions: str (optional, human guidance for the draft)
+    """
+    package_id = payload.get("package_id")
+    if not package_id:
+        raise FatalJobError("content_generation requires package_id")
+    extra_instructions = str(payload.get("extra_instructions") or "")
+
+    progress.next("load_package")
+    with SessionLocal() as session:
+        from agents import copywriter as copywriter_agent
+        from packages.providers.gemini import ProviderUnavailable
+        from packages.research.content import ContentService, PublicationBlocked
+
+        package = _package_for_context(session, ctx, package_id)
+        service = ContentService(session)
+
+        progress.next("generate")
+        try:
+            proposal, provenance = copywriter_agent.write_draft(
+                session,
+                ctx,
+                package,
+                _copywriter_provider(),
+                extra_instructions=extra_instructions,
+            )
+        except copywriter_agent.CopywriterBlocked as exc:
+            raise FatalJobError(f"content generation blocked: {exc}") from exc
+        except ProviderUnavailable as exc:
+            raise RetryableJobError(f"llm provider unavailable: {exc}") from exc
+
+        progress.next("persist_draft")
+        try:
+            draft = service.generate_draft(
+                ctx,
+                package,
+                title=proposal.title,
+                caption=proposal.caption,
+                claim_ids_used=proposal.claim_ids_used,
+                payload={
+                    "generated_by": copywriter_agent.metadata_from(provenance),
+                    "slides": [s.model_dump() for s in proposal.slides],
+                    "seo": proposal.seo.model_dump(),
+                    "microloop_text": proposal.microloop_text,
+                },
+            )
+        except PublicationBlocked as exc:
+            raise FatalJobError(f"draft rejected by content service: {exc}") from exc
+        session.commit()
+        progress.done("persist_draft")
+    return {
+        "package_id": str(package.id),
+        "draft_id": str(draft.id),
+        "title": proposal.title,
+        "provider": provenance.get("provider"),
+        "model": provenance.get("model"),
+        "prompt_version": provenance.get("prompt_version"),
+        "awaiting_human_review": True,
+    }
+
+
+CONTENT_GENERATION = content_generation
