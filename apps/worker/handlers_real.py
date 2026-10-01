@@ -404,7 +404,12 @@ def export_handler(
         from packages.research.content import ContentService, PublicationBlocked
 
         package = _package_for_context(session, ctx, package_id)
-        service = ContentService(session, export_root=Path(_settings().export_root))
+        settings = _settings()
+        service = ContentService(
+            session,
+            export_root=Path(settings.export_root),
+            asset_root=Path(settings.asset_root),
+        )
 
         progress.next("export")
         try:

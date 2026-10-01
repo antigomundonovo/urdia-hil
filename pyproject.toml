@@ -19,6 +19,7 @@ dependencies = [
     "pgvector>=0.3.6",
     "httpx>=0.28",
     "pillow>=11.0",
+    "yt-dlp>=2025.1.1",
 ]
 
 [project.optional-dependencies]

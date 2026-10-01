@@ -825,6 +825,157 @@ class NotImplementedAdapter:
         raise AdapterError(f"adapter '{self.source_type}' not implemented yet (Doc 09)")
 
 
+def _vtt_to_text(vtt: str) -> str:
+    """Flatten a WebVTT caption file to plain transcript text (no cues/
+    timestamps/headers). Igna apenas conteúdo legível (Doc 09 normalize)."""
+    lines: list[str] = []
+    seen: set[str] = set()
+    for line in vtt.splitlines():
+        line = line.strip()
+        if (
+            not line
+            or line.startswith(("WEBVTT", "Kind:", "Language:", "NOTE"))
+            or "-->" in line
+            or line.isdigit()
+        ):
+            continue
+        line = re.sub(r"<[^>]+>", "", line)  # strip inline tags
+        if line and line not in seen:
+            seen.add(line)
+            lines.append(line)
+    return " ".join(lines)
+
+
+class YouTubeAdapter:
+    """YouTube source adapter (AMENDMENT-012 approved, Doc 09 provenance).
+
+    Metadata + captions only — never downloads video bytes. Single video URLs
+    produce one RawItem whose summary is the best available pt-BR (or any)
+    transcript; channel/playlist URLs produce metadata-only items for the
+    latest entries. yt-dlp does its own networking (SafeFetcher not used for
+    the fetch itself); everything extracted is untrusted data (Doc 08).
+    """
+
+    source_type = "youtube"
+
+    _BASE_YDL_OPTS = {
+        "quiet": True,
+        "no_warnings": True,
+        "skip_download": True,
+        "extract_flat": "in_playlist",
+        "noplaylist": False,
+    }
+
+    def __init__(self, fetcher: SafeFetcher) -> None:
+        self.fetcher = fetcher
+        self.last_result: FetchResult | None = None
+
+    @staticmethod
+    def _ydl_opts() -> dict[str, Any]:
+        """Base options; YouTube now requires a session for metadata — cookies
+        come from the operator's own browser (optional settings, local only)."""
+        from packages.shared.settings import get_settings
+
+        opts = dict(YouTubeAdapter._BASE_YDL_OPTS)
+        settings = get_settings()
+        if settings.yt_dlp_cookies_from_browser:
+            opts["cookiesfrombrowser"] = (
+                settings.yt_dlp_cookies_from_browser,
+            )
+        elif settings.yt_dlp_cookies_file:
+            opts["cookiefile"] = settings.yt_dlp_cookies_file
+        return opts
+
+    def fetch_items(
+        self,
+        source_url: str,
+        fetcher: SafeFetcher | None = None,
+        *,
+        etag: str | None = None,
+        last_modified: str | None = None,
+    ) -> list[RawItem]:
+        try:
+            import yt_dlp
+        except ImportError as exc:  # pragma: no cover - declared dependency
+            raise AdapterError("yt-dlp is not installed") from exc
+
+        try:
+            with yt_dlp.YoutubeDL(self._ydl_opts()) as ydl:
+                info = ydl.extract_info(source_url, download=False)
+        except Exception as exc:
+            raise AdapterError(f"youtube fetch failed: {exc.__class__.__name__}") from exc
+        if not info:
+            return []
+
+        if info.get("_type") == "playlist" or "entries" in info:
+            items = []
+            for entry in (info.get("entries") or [])[:25]:
+                if not entry or not entry.get("id"):
+                    continue
+                url = entry.get("url") or (
+                    f"https://www.youtube.com/watch?v={entry['id']}"
+                )
+                items.append(
+                    RawItem(
+                        url=url,
+                        title=entry.get("title"),
+                        summary=(entry.get("description") or "").strip() or None,
+                        published_at=_youtube_date(entry.get("upload_date")),
+                    )
+                )
+            return items
+
+        return [self._video_item(info)]
+
+    def _video_item(self, info: dict[str, Any]) -> RawItem:
+        transcript = self._best_transcript(info)
+        summary = transcript or (info.get("description") or "").strip() or None
+        return RawItem(
+            url=info.get("webpage_url")
+            or f"https://www.youtube.com/watch?v={info.get('id', '')}",
+            title=info.get("title"),
+            summary=summary,
+            published_at=_youtube_date(info.get("upload_date")),
+        )
+
+    def _best_transcript(self, info: dict[str, Any]) -> str | None:
+        """Manual captions first (pt-BR → pt → en → any), then auto captions."""
+        for tracks in (info.get("subtitles"), info.get("automatic_captions")):
+            if not tracks:
+                continue
+            for lang in ("pt-BR", "pt", "en"):
+                candidates = [k for k in tracks if k.startswith(lang)]
+                chosen = (candidates or list(tracks))[:1]
+                for key in chosen:
+                    for fmt in tracks[key]:
+                        if fmt.get("ext") in ("vtt", "srv3", "json3") or fmt.get("url"):
+                            text = self._fetch_caption(fmt.get("url"))
+                            if text:
+                                return text
+        return None
+
+    def _fetch_caption(self, url: str | None) -> str | None:
+        if not url:
+            return None
+        try:
+            result = self.fetcher.fetch(url)
+        except Exception:
+            return None
+        if result.status_code != 200 or not result.content:
+            return None
+        try:
+            text = _vtt_to_text(result.content.decode("utf-8", errors="replace"))
+        except Exception:
+            return None
+        return text or None
+
+
+def _youtube_date(upload_date: str | None) -> str | None:
+    if upload_date and len(upload_date) == 8:
+        return f"{upload_date[:4]}-{upload_date[4:6]}-{upload_date[6:]}"
+    return upload_date
+
+
 def get_adapter(source_type: str, fetcher: SafeFetcher) -> SourceAdapter:
     if source_type == "rss":
         return RssAdapter(fetcher)
@@ -848,6 +999,8 @@ def get_adapter(source_type: str, fetcher: SafeFetcher) -> SourceAdapter:
         return InternetArchiveAdapter(fetcher)
     if source_type == "wikimedia":
         return WikimediaAdapter(fetcher)
+    if source_type == "youtube":
+        return YouTubeAdapter(fetcher)
     if source_type in _DECLARED_LATER:
         return NotImplementedAdapter(source_type)
     raise AdapterError(f"unknown source_type: {source_type}")

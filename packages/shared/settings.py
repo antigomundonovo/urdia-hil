@@ -49,6 +49,11 @@ class Settings(BaseSettings):
     llm_model: str = "gemini-2.5-flash"
     llm_timeout_seconds: float = 60.0
 
+    # YouTube adapter (AMENDMENT-012): YouTube requires a session for
+    # metadata; cookies come from the operator's own browser (optional).
+    yt_dlp_cookies_from_browser: str | None = None
+    yt_dlp_cookies_file: str | None = None
+
     @property
     def cors_origin_list(self) -> list[str]:
         """Doc 08: CORS por allowlist, nunca wildcard."""
