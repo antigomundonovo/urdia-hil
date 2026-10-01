@@ -7,7 +7,21 @@ as each Doc 17 milestone lands:
 
 - DISCOVERY_SCAN / SOURCE_RETRIEVAL / CLAIM_VERIFICATION: apps.worker.handlers
 - IMAGE_ANALYSIS / RIGHTS_RESEARCH / CLAIM_EXTRACTION / FORMAT_PLANNING /
-  OPPORTUNITY_ANALYSIS: apps.worker.handlers_real
+  OPPORTUNITY_ANALYSIS / QC / EXPORT / ANALYTICS_SYNC / COMMENT_SYNC /
+  LEARNING_ANALYSIS: apps.worker.handlers_real
+
+The 7 remaining stubs below are intentionally NOT implemented in V1
+(Doc 17 Core Rule: no invented features):
+- SOURCE_EXTRACTION / SOURCE_CLUSTERING: covered by the discovery scan;
+  a separate pipeline would duplicate it without a spec.
+- IMAGE_RESEARCH / ADVERSARIAL_RESEARCH: require external search/LLM APIs
+  (human batch: API keys).
+- CONTENT_GENERATION: V1 draft text is authored by the human via the API;
+  automated generation needs the LLM provider (human batch).
+- VISUAL_GENERATION: Doc 13 render runs inside export_package; a standalone
+  job would duplicate it without a spec.
+- PUBLICATION: automated publishing violates Amendment 007 / Doc 14 —
+  publication is manual-confirm in V1.
 """
 
 from __future__ import annotations
@@ -36,9 +50,4 @@ IMAGE_RESEARCH = _noop_handler("image_research")
 ADVERSARIAL_RESEARCH = _noop_handler("adversarial_research")
 CONTENT_GENERATION = _noop_handler("content_generation")
 VISUAL_GENERATION = _noop_handler("visual_generation")
-QC = _noop_handler("qc")
-EXPORT = _noop_handler("export")
 PUBLICATION = _noop_handler("publication")
-ANALYTICS_SYNC = _noop_handler("analytics_sync")
-COMMENT_SYNC = _noop_handler("comment_sync")
-LEARNING_ANALYSIS = _noop_handler("learning_analysis")

@@ -16,8 +16,8 @@ from packages.domain.enums import JobType
 
 # Real handlers that REQUIRE domain ids in the payload; an empty payload is a
 # schema error and must fail closed (Doc 03 non-retryable). OPPORTUNITY_ANALYSIS
-# intentionally accepts an empty payload: opportunity_ids is optional and
-# defaults to "all opportunities in the profile".
+# (opportunity_ids optional) and LEARNING_ANALYSIS (no payload needed) accept
+# an empty payload on purpose.
 REAL_HANDLERS_REQUIRING_IDS = {
     "DISCOVERY_SCAN",
     "SOURCE_RETRIEVAL",
@@ -26,8 +26,15 @@ REAL_HANDLERS_REQUIRING_IDS = {
     "RIGHTS_RESEARCH",
     "CLAIM_EXTRACTION",
     "FORMAT_PLANNING",
+    "QC",
+    "EXPORT",
+    "ANALYTICS_SYNC",
+    "COMMENT_SYNC",
 }
-REAL_HANDLERS = REAL_HANDLERS_REQUIRING_IDS | {"OPPORTUNITY_ANALYSIS"}
+REAL_HANDLERS = REAL_HANDLERS_REQUIRING_IDS | {
+    "OPPORTUNITY_ANALYSIS",
+    "LEARNING_ANALYSIS",
+}
 
 
 class DummySession:
@@ -94,3 +101,15 @@ def test_real_handlers_fail_closed_on_empty_payload():
         result = engine.run_job(job)
         assert result.status == JOB_FAILED, f"{jt} unexpectedly succeeded"
         assert result.error, f"{jt} failed without an error message"
+
+
+def test_qc_handler_scopes_by_workspace():
+    """A QC job for a package id that does not exist in the job's workspace
+    fails closed with a scoping error — never touches foreign data (Doc 08)."""
+    handlers = build_handlers()
+    engine = JobEngine(DummySession(), handlers)
+    job = make_job("QC")
+    job.payload = {"package_id": str(uuid4())}
+    result = engine.run_job(job)
+    assert result.status == JOB_FAILED
+    assert "not found in job workspace" in (result.error or "")

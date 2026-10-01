@@ -17,30 +17,30 @@ def build_handlers() -> dict:
     """Job handlers registered as milestones land (Doc 17 order).
 
     Real implementations win over stubs: DISCOVERY_SCAN, SOURCE_RETRIEVAL and
-    CLAIM_VERIFICATION use the production handlers (apps.worker.handlers);
-    five more use handlers_real; the remaining job types stay on no-op stubs
-    until their milestone wiring lands.
+    CLAIM_VERIFICATION use the production handlers (apps.worker.handlers); ten
+    more use handlers_real; the remaining job types stay on no-op stubs until
+    their milestone wiring lands (LLM keys / external APIs / V1 scope).
     """
     from apps.worker import handlers
     from apps.worker.handlers_new import (
         ADVERSARIAL_RESEARCH,
-        ANALYTICS_SYNC,
-        COMMENT_SYNC,
         CONTENT_GENERATION,
-        EXPORT,
         IMAGE_RESEARCH,
-        LEARNING_ANALYSIS,
         PUBLICATION,
-        QC,
         SOURCE_CLUSTERING,
         SOURCE_EXTRACTION,
         VISUAL_GENERATION,
     )
     from apps.worker.handlers_real import (
+        ANALYTICS_SYNC,
         CLAIM_EXTRACTION,
+        COMMENT_SYNC,
+        EXPORT,
         FORMAT_PLANNING,
         IMAGE_ANALYSIS,
+        LEARNING_ANALYSIS,
         OPPORTUNITY_ANALYSIS,
+        QC,
         RIGHTS_RESEARCH,
     )
 
