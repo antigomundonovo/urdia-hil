@@ -778,7 +778,7 @@ class ContentService:
         date_part = datetime.now(UTC).strftime("%Y-%m-%d")
         short_id = str(package.id)[:8]
         export_dir = self.export_root / f"post-{date_part}-{short_id}"
-        for sub in ("image", "captions", "sources", "rights", "platform_variants"):
+        for sub in ("image", "carousel", "microloop", "captions", "sources", "rights", "platform_variants"):
             (export_dir / sub).mkdir(parents=True, exist_ok=True)
         (export_dir / "manifest.json").unlink(missing_ok=True)
 
@@ -1018,6 +1018,15 @@ class ContentService:
             payload={"exported_from": "V1 manual export"},
         )
         self.session.add(variant)
+        render_block = self._render_outputs(
+            ctx=ctx,
+            package=package,
+            draft=draft,
+            used_claims=used_claims,
+            sources=sources,
+            exported_assets=exported_assets,
+            export_dir=export_dir,
+        )
         manifest = {
             "package_id": str(package.id),
             "opportunity_id": str(opp.id),
@@ -1032,6 +1041,8 @@ class ContentService:
             "source_count": len(sources),
             "claim_count": len(used_claims),
         }
+        if render_block is not None:
+            manifest["render"] = render_block
         (export_dir / "manifest.json").write_text(
             json.dumps(manifest, indent=2, ensure_ascii=False), encoding="utf-8"
         )
@@ -1068,3 +1079,113 @@ class ContentService:
             metadata={"platform": platform, "path": str(export_dir)},
         )
         return export_dir
+
+    # --- rendering (Doc 13) ---------------------------------------------------
+
+    def _render_outputs(
+        self,
+        *,
+        ctx: ExecutionContext,
+        package: ContentPackage,
+        draft: Draft | None,
+        used_claims: list[Claim],
+        sources: list[Source],
+        exported_assets: list[dict[str, Any]],
+        export_dir: Path,
+    ) -> dict[str, Any] | None:
+        """Render stills for PHOTO_POST/CAROUSEL into the export folder and
+        return the manifest "render" block (Doc 13 determinism + QC).
+        MICROLOOP assembly is not part of V1 render — returns None unchanged.
+        Fail closed: any render/QC error aborts the export."""
+        from packages.rendering import engine as render_engine
+        from packages.rendering import qc as render_qc
+
+        first_asset_bytes: bytes | None = None
+        requires_image = False
+        for entry in exported_assets:
+            if entry.get("file_included"):
+                asset_file = export_dir / "image" / entry["filename"]
+                first_asset_bytes = asset_file.read_bytes()
+                requires_image = True
+                break
+
+        title = draft.title if draft else ""
+        caption = draft.caption if draft else ""
+        if package.format not in (ContentFormat.PHOTO_POST.value, ContentFormat.CAROUSEL.value):
+            return None  # MICROLOOP: no still render in V1
+        if not title and not caption:
+            raise PublicationBlocked("draft has no text to render")
+
+        try:
+            rendered: list[tuple[str, "render_engine.RenderedSlide", dict[str, str]]] = []
+            if package.format == ContentFormat.PHOTO_POST.value:
+                # Doc 13 ANM default: image-first, little text on the art —
+                # only the hook goes on the image; the full caption ships in
+                # captions/caption.txt.
+                slide = render_engine.render_photo_post(
+                    heading=title, body="", image_bytes=first_asset_bytes
+                )
+                (export_dir / "image" / "render-photo-post.png").write_bytes(slide.png)
+                rendered.append(
+                    (
+                        "image/render-photo-post.png",
+                        slide,
+                        render_qc.validate_render(
+                            slide,
+                            expected_size=render_engine.DEFAULT_SIZE,
+                            requires_image=requires_image,
+                        ),
+                    )
+                )
+            elif package.format == ContentFormat.CAROUSEL.value:
+                canonical = self.session.get(CanonicalContent, package.canonical_content_id)
+                claim_texts = [
+                    claim.editorial_wording
+                    or claim.normalized_text
+                    or f"{claim.subject or ''} {claim.predicate or ''} {claim.object or ''}".strip()
+                    for claim in used_claims
+                ]
+                source_labels = [
+                    f"{s.publisher or s.title or 'Fonte registrada'}"
+                    + (f" — {s.url}" if s.url else "")
+                    for s in sources
+                ]
+                specs = render_engine.build_carousel_specs(
+                    title=title,
+                    caption=caption,
+                    key_message=(canonical.key_message if canonical else "") or "",
+                    editorial_angle=(canonical.editorial_angle if canonical else "") or "",
+                    source_labels=source_labels,
+                    first_image=first_asset_bytes,
+                    claim_texts=claim_texts,
+                )
+                for index, (spec, role) in enumerate(zip(specs, render_engine.CAROUSEL_SLIDES), start=1):
+                    slide = render_engine.render_carousel_slide(spec)
+                    slug = role.lower().replace(" / ", "-").replace(" ", "-")
+                    path = f"carousel/slide-{index:02d}-{slug}.png"
+                    (export_dir / "carousel" / f"slide-{index:02d}-{slug}.png").write_bytes(slide.png)
+                    rendered.append(
+                        (
+                            path,
+                            slide,
+                            render_qc.validate_render(
+                                slide,
+                                expected_size=render_engine.DEFAULT_SIZE,
+                                requires_image=(index == 1 and requires_image),
+                            ),
+                        )
+                    )
+            else:
+                return None  # MICROLOOP: no still render in V1
+
+            block = render_engine.render_version_block()
+            block.update(render_qc.render_metadata_block(rendered))
+            if block["summary"] != "PASS":
+                raise PublicationBlocked(
+                    f"render QC failed: {[k for k, v in block['qc'].items() if v == 'FAIL']}"
+                )
+            return block
+        except PublicationBlocked:
+            raise
+        except Exception as exc:
+            raise PublicationBlocked(f"render failed: {exc}") from exc

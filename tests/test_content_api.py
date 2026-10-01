@@ -7,6 +7,7 @@ from io import BytesIO
 
 import pytest
 from fastapi.testclient import TestClient
+from PIL import Image
 
 from apps.api.main import app
 from packages.domain.assets import Asset
@@ -101,7 +102,10 @@ def test_full_content_flow_through_api(client, db, world, monkeypatch, tmp_path)
     opp_id, claim_id = _seed_full(db, world)
     asset_link = db.query(OpportunityAsset).filter_by(opportunity_id=opp_id).one()
     asset = db.get(Asset, asset_link.ref_id)
-    image_bytes = b"\x89PNG\r\n\x1a\nurdia-test-image"
+    # a real decodable PNG: export now renders stills from included assets
+    buffer = BytesIO()
+    Image.new("RGB", (320, 400), (120, 90, 60)).save(buffer, format="PNG")
+    image_bytes = buffer.getvalue()
     asset.storage_path = f"originals/{asset.id}.png"
     asset.file_hash = hashlib.sha256(image_bytes).hexdigest()
     image_path = asset_root / asset.storage_path
