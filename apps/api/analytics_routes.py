@@ -333,3 +333,44 @@ def activate_rule(
 
 # composition hint: OpportunityService imported for ctx consistency elsewhere
 _ = OpportunityService
+
+class ConfirmBody(BaseModel):
+    remote_id: str | None = None
+
+
+@router.post("/publications/{publication_id}/confirm")
+def confirm_publication(
+    publication_id: UUID,
+    body: ConfirmBody,
+    workspace_id: UUID = Query(...),
+    session: Session = Depends(get_session),
+):
+    """AMENDMENT-007: Confirm manual EXPORT/MANUAL publication was actually posted.
+    
+    Marks PENDING -> PUBLISHED with published_at and optional remote_id.
+    Restricted to EXPORT/MANUAL method publications in PENDING status.
+    Audited via existing audit trail.
+    """
+    pub = _publication_scoped(session, publication_id, workspace_id)
+    
+    # Only allow confirm for manual/export methods
+    if pub.method not in ("EXPORT", "MANUAL"):
+        raise HTTPException(
+            status_code=409, 
+            detail=f"confirm only allowed for EXPORT/MANUAL publications, not {pub.method}"
+        )
+    
+    if pub.status != "PENDING":
+        raise HTTPException(
+            status_code=409, 
+            detail=f"confirm only allowed for PENDING publications, current status: {pub.status}"
+        )
+    
+    from datetime import UTC, datetime
+    pub.status = "PUBLISHED"
+    pub.published_at = datetime.now(UTC)
+    if body.remote_id is not None:
+        pub.remote_id = body.remote_id
+    
+    session.commit()
+    return {"id": str(pub.id), "status": pub.status, "published_at": pub.published_at.isoformat()}
