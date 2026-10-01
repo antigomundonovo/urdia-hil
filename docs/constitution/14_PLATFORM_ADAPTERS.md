@@ -27,14 +27,15 @@ permanecem no backend; o core passa apenas referências opacas de credenciais.
 ```text
 Instagram
 Facebook
+X (Twitter)
+YouTube Community
 TikTok
 Threads
-X
-Pinterest
-YouTube Community
-LinkedIn
-Reddit
+Kwai
 ```
+
+> Lista definitiva conforme AMENDMENT-2026-10-01-011 (APROVADA):
+> Pinterest, LinkedIn e Reddit saem do escopo do projeto.
 
 ## Methods
 ```text
@@ -50,8 +51,10 @@ Nunca codificar `MAX = ...` no core. Consultar registry/runtime capability.
 ## YouTube Community
 Suportar `MANUAL`/`EXPORT` até que capability oficial adequada esteja realmente configurada.
 
-## Reddit
-Verificar comunidade, regras, autopromoção, formato e relevância antes de decidir.
+## Kwai
+Mesma regra do YouTube Community: suportar `MANUAL`/`EXPORT` até que uma
+capability oficial adequada esteja realmente configurada
+(AMENDMENT-2026-10-01-011).
 
 ## Publication security
 Publisher recebe somente:
