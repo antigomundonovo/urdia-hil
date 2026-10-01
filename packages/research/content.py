@@ -35,6 +35,7 @@ from packages.domain.enums import (
     ContentFormat,
     GateResult,
     OpportunityState,
+    PublicationMethod,
     QualityGate,
     RightsClassification,
     RightsGateOutcome,
@@ -44,6 +45,7 @@ from packages.domain.knowledge import Claim, EvidenceRecord
 from packages.domain.models import AuditEvent, Source
 from packages.domain.repositories import AuditRepository
 from packages.governance.audit import append_audit
+from packages.providers.platform_catalog import get_declared, posting_method
 from packages.research.opportunity import OpportunityService
 from packages.research.rights import rights_gate
 from packages.shared.execution_context import ExecutionContext
@@ -768,6 +770,91 @@ class ContentService:
             )
         return checks
 
+    # --- manual posting kit (Doc 14: MANUAL platforms) --------------------------
+
+    def _write_manual_posting_kit(
+        self,
+        *,
+        export_dir: Path,
+        platform: str,
+        opportunity_title: str,
+        draft: Draft,
+        exported_assets: list[dict[str, Any]],
+        used_claims: list[Claim],
+        sources: list[Source],
+        publication_id,
+        approved_by,
+    ) -> None:
+        """For platforms without an official posting API (Doc 14 MANUAL,
+        e.g. Kwai): generate a complete manual-posting kit — everything a
+        human needs to post on the network, then confirm in URDIA."""
+        declared = get_declared(platform)
+        display_name = declared.display_name if declared else platform
+        seo = (draft.payload or {}).get("seo") or {}
+        keywords = ", ".join(str(k) for k in seo.get("keywords", []) if k)
+        media_lines = [
+            f"- `image/{entry['filename']}` ({entry.get('asset_type', 'PHOTO')})"
+            for entry in exported_assets
+            if entry.get("file_included") and entry.get("filename")
+        ]
+        media_lines.append("- `image/render-photo-post.png` (arte renderizada, se existir)")
+        claims_block = "\n".join(
+            f"- [{claim.status.value if hasattr(claim.status, 'value') else claim.status}] "
+            f"{claim.normalized_text or claim.subject} (id {claim.id})"
+            for claim in used_claims
+        )
+        sources_block = "\n".join(
+            f"- {s.publisher or 'fonte'} — {s.url}" for s in sources
+        )
+        kit = f"""# Kit de Postagem Manual — {display_name}
+
+Gerado pela URDIA em {datetime.now(UTC).isoformat(timespec="seconds")} —
+pacote `{export_dir.name}`, aprovado por {approved_by or "humano"}.
+Publicação-alvo: `{publication_id}`.
+
+## Por que esta postagem é manual
+{display_name} não oferece API oficial de publicação (verificado no
+catálogo de capacidades, docs/PLATFORM_CAPABILITIES.md). Publique seguindo
+os passos abaixo e depois confirme no sistema — a postagem só é marcada
+como PUBLISHED após essa confirmação humana.
+
+## Texto (copie e cole)
+**Título:** {draft.title}
+
+{draft.caption}
+"""
+        if keywords:
+            hashtags = " ".join(
+                f"#{str(k).replace(' ', '')}" for k in seo.get("keywords", []) if k
+            )
+            kit += f"\n**Hashtags sugeridas:** {hashtags}\n"
+        kit += f"""
+## Mídia (arquivos neste pacote)
+{chr(10).join(media_lines) if media_lines else "- (sem mídia exportada)"}
+
+## Passos sugeridos ({display_name})
+1. Abra o {display_name} (app ou Creator Center) e faça login na conta do perfil.
+2. Crie uma nova publicação e cole o texto acima.
+3. Anexe a(s) mídia(s) indicadas na pasta `image/` deste pacote.
+4. Revise a pré-visualização (enquadramento, legenda, hashtags).
+5. Publique e copie o link/permalink da postagem.
+
+## Rastreabilidade (não postar; uso interno)
+### Claims usados
+{claims_block or "- (nenhum)"}
+
+### Fontes
+{sources_block or "- (nenhuma)"}
+
+## Depois de publicar
+Confirme no sistema:
+`POST /api/v1/publications/{publication_id}/confirm` com body
+`{{"remote_url": "<link da postagem>"}}` — status PENDING → PUBLISHED.
+"""
+        kit_dir = export_dir / "platform_variants" / platform
+        kit_dir.mkdir(parents=True, exist_ok=True)
+        (kit_dir / "MANUAL_POSTING.md").write_text(kit, encoding="utf-8")
+
     # --- export (Doc 13) -------------------------------------------------------
 
     def export_package(self, ctx: ExecutionContext, package: ContentPackage, platform: str) -> Path:
@@ -1077,6 +1164,19 @@ class ContentService:
             )
             self.session.add(publication)
         self.session.flush()
+        publication_record = existing or publication
+        if posting_method(platform) is PublicationMethod.MANUAL:
+            self._write_manual_posting_kit(
+                export_dir=export_dir,
+                platform=platform,
+                opportunity_title=opp.title,
+                draft=draft,
+                exported_assets=exported_assets,
+                used_claims=used_claims,
+                sources=sources,
+                publication_id=publication_record.id,
+                approved_by=ctx.actor_id,
+            )
         append_audit(
             self.session,
             ctx=ctx,
