@@ -11,6 +11,7 @@ from apps.api.jobs_routes import router as jobs_router
 from apps.api.opportunities_routes import router as opportunities_router
 from apps.api.profiles_routes import router as profiles_router
 from apps.api.registry_routes import router as registry_router
+from apps.api.social_routes import router as social_router
 from apps.api.sources_routes import router as sources_router
 from packages.domain.enums import HealthState
 from packages.shared.db import engine
@@ -32,6 +33,7 @@ app.include_router(opportunities_router, dependencies=[Depends(require_workspace
 app.include_router(sources_router, dependencies=[Depends(require_workspace_access)])
 app.include_router(content_router, dependencies=[Depends(require_workspace_access)])
 app.include_router(analytics_router, dependencies=[Depends(require_workspace_access)])
+app.include_router(social_router, dependencies=[Depends(require_workspace_access)])
 
 
 @app.get("/api/v1/health")

@@ -100,6 +100,30 @@ def _analytics(ctx, payload):
     return _invoke_handler("apps.worker.handlers_real", "ANALYTICS_SYNC", ctx, payload)
 
 
+def _factuality_challenge(ctx, payload):
+    """Run the judge over a factuality challenge (contract §11): maps the
+    deterministic verdict onto the challenge. Evidence itself is gathered
+    through registered sources (research sweep / add_evidence)."""
+    if not payload.get("challenge_id"):
+        raise SkillError("factuality_challenge requires challenge_id")
+    from packages.research.social import SocialError, SocialIntelligenceService
+    from packages.shared.db import SessionLocal
+
+    with SessionLocal() as session:
+        service = SocialIntelligenceService(session)
+        try:
+            challenge = service.research_challenge(ctx, payload["challenge_id"])
+            session.commit()
+        except SocialError as exc:
+            raise SkillError(f"factuality_challenge: {exc}") from exc
+        return {
+            "challenge_id": str(challenge.id),
+            "status": challenge.status,
+            "verdict": challenge.verdict,
+            "verdict_reason": challenge.verdict_reason,
+        }
+
+
 # --- declared skills (documented, unimplemented in V1) -----------------------
 
 
@@ -164,6 +188,15 @@ def build_skill_registry() -> SkillRegistry:
             description="Exporta pacote READY; termina em PENDING p/ confirm humano",
             required_payload_keys=("package_id", "platform"),
             invoke=_publication,
+        )
+    )
+    registry.register(
+        SkillDefinition(
+            key="factuality_challenge",
+            name="Factuality Challenge",
+            description="Julga desafio factual de comentário via judge determinístico (§11)",
+            required_payload_keys=("challenge_id",),
+            invoke=_factuality_challenge,
         )
     )
     registry.register(

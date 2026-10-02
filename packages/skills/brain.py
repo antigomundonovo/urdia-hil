@@ -80,6 +80,24 @@ RECIPE_REGISTRY: dict[str, Recipe] = {
         steps=(Step(skill="factuality", alias="verdicts"),),
         human_gate="nenhum (somente leitura/recálculo auditado)",
     ),
+    "factuality_challenge": Recipe(
+        key="factuality_challenge",
+        description=(
+            "Comentário -> desafio factual (já criado via API) -> pesquisa nas "
+            "fontes registradas -> judge determinístico -> veredito -> Human "
+            "Gate de revisão. O comentário NUNCA é evidência por si (§11)."
+        ),
+        steps=(
+            Step(skill="research", alias="sweep", input_from={
+                "workspace_id": "$input.workspace_id",
+                "profile_id": "$input.profile_id",
+            }),
+            Step(skill="factuality_challenge", alias="judged", input_from={
+                "challenge_id": "$input.challenge_id",
+            }),
+        ),
+        human_gate="POST /api/v1/social/challenges/{id}/review (humano)",
+    ),
     "research_sweep": Recipe(
         key="research_sweep",
         description=(
