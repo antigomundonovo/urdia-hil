@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     cache_root: str = "./assets/cache"
     temp_root: str = "./assets/temp"
 
-    default_profile_key: str = "antigo_mundo_novo"
+    default_profile_key: str = "default"
     log_level: str = "INFO"
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     frontend_base_url: str = "http://localhost:5173"

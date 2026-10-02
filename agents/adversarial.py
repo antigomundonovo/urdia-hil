@@ -36,13 +36,14 @@ ADVERSARIAL_JSON_SCHEMA: dict = {
 }
 
 PROMPT = (
-    "Você é o pesquisador adversário da URDIA (antigo Mundo Novo: história do "
-    "Rio de Janeiro). Dada a alegação factual abaixo, produza de 3 a 5 queries "
+    "Você é o pesquisador adversário da URDIA. Dada a alegação factual abaixo, "
+    "produza de 3 a 5 queries "
     "de busca em português e/ou inglês projetadas para ENCONTRAR EVIDÊNCIAS QUE "
     "CONTRADIGAM ou refutem a alegação (datas diferentes, versões concorrentes, "
     "contestações de fontes primárias). Use `engine: \"gdelt\"` para notícias/"
     "jornais e `engine: \"wikipedia\"` para verbetes. Nunca inclua a alegação "
-    "integral na query: extraia os termos verificáveis (nomes, datas, lugares). "
+    "integral na query: extraia os termos verificáveis (nomes, datas, lugares e "
+    "entidades relevantes ao domínio). "
     "Responda apenas no JSON do schema."
 )
 

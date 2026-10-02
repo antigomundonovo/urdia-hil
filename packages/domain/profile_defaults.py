@@ -1,20 +1,15 @@
-"""Source-of-truth defaults for a new editorial profile.
+"""Source-of-truth defaults for new and legacy editorial profiles.
 
-ANM_* remains as a legacy compatibility profile for existing workspaces.
-New workspaces must not inherit a channel-specific identity.
+The default profile is deliberately domain-neutral. ANM remains available as a
+legacy compatibility profile for existing History Intelligence Layer workspaces.
 """
 
 DEFAULT_PROFILE_KEY = "default"
 DEFAULT_EDITORIAL_POLICY: dict = {
     "language": "pt-BR",
     "audience": "Brasil",
-    "brazil_weight": 0.65,
-    "world_weight": 0.35,
-    "historical_depth": 7,
-    "editorial_style": "acessível + curioso + documental",
+    "editorial_style": "acessível + claro + documental",
     "image_first": True,
-    "real_historical_assets_first": True,
-    "ai_imagery": "secondary",
     "uncertainty": "required",
     "political_policy": "neutral_evidence_based",
     "human_approval_required": True,
@@ -23,5 +18,13 @@ DEFAULT_EDITORIAL_POLICY: dict = {
 }
 
 ANM_PROFILE_KEY = "antigo_mundo_novo"
-ANM_EDITORIAL_POLICY = DEFAULT_EDITORIAL_POLICY.copy()
-ANM_EDITORIAL_POLICY["legacy_channel_identity"] = "Antigo Mundo Novo"
+ANM_EDITORIAL_POLICY: dict = {
+    **DEFAULT_EDITORIAL_POLICY,
+    "brazil_weight": 0.65,
+    "world_weight": 0.35,
+    "historical_depth": 7,
+    "editorial_style": "acessível + curioso + documental",
+    "real_historical_assets_first": True,
+    "ai_imagery": "secondary",
+    "legacy_channel_identity": "Antigo Mundo Novo",
+}
