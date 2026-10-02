@@ -61,6 +61,9 @@ class Settings(BaseSettings):
     meta_instagram_token: str = Field(default="", repr=False)
     meta_instagram_token_expires_at: str | None = None
 
+    # TikTok Content Posting API. User access token is secret and never repr/logged.
+    tiktok_access_token: str = Field(default="", repr=False)
+
     @property
     def cors_origin_list(self) -> list[str]:
         """Doc 08: CORS por allowlist, nunca wildcard."""
