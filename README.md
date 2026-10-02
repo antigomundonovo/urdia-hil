@@ -57,7 +57,7 @@ Pillow / SVG / FFmpeg
 DuckDB
 ```
 
-Provider-agnostic. Desktop-first / Windows / Local-first.
+Provider-agnostic. **Web-first** (browser: FastAPI + React/Vite) / Windows dev / Local-first — os dados e segredos permanecem na máquina do operador.
 
 ## Estrutura do monorepo
 
