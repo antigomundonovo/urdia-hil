@@ -31,7 +31,7 @@ from packages.domain.models import (
     Workspace,
     WorkspaceMember,
 )
-from packages.domain.profile_defaults import ANM_EDITORIAL_POLICY, ANM_PROFILE_KEY
+from packages.domain.profile_defaults import DEFAULT_EDITORIAL_POLICY, DEFAULT_PROFILE_KEY
 from packages.shared.db import get_session
 from packages.shared.email import EmailDeliveryError, send_email
 from packages.shared.settings import get_settings
@@ -312,12 +312,12 @@ def register(
         )
         profile = Profile(
             workspace_id=workspace.id,
-            key=ANM_PROFILE_KEY,
-            name="Antigo Mundo Novo",
-            language=ANM_EDITORIAL_POLICY["language"],
-            audience_region=ANM_EDITORIAL_POLICY["audience"],
-            editorial_policy=ANM_EDITORIAL_POLICY,
-            automation_level=ANM_EDITORIAL_POLICY["automation_level"],
+            key=DEFAULT_PROFILE_KEY,
+            name="Default Profile",
+            language=DEFAULT_EDITORIAL_POLICY["language"],
+            audience_region=DEFAULT_EDITORIAL_POLICY["audience"],
+            editorial_policy=DEFAULT_EDITORIAL_POLICY,
+            automation_level=DEFAULT_EDITORIAL_POLICY["automation_level"],
             status="ACTIVE",
         )
         session.add_all(

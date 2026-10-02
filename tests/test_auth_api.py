@@ -3,6 +3,7 @@
 from uuid import uuid4
 
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from apps.api.main import app
 from packages.shared.db import get_session
@@ -50,6 +51,15 @@ def test_register_verify_login_me_logout_and_revocation(db, monkeypatch):
         assert "urdia_session" not in registered.cookies
         assert registered.headers["cache-control"] == "no-store"
         assert len(issued_tokens) == 1
+        workspace_id = None
+        from packages.domain.models import Profile, Workspace
+        profile_rows = db.scalars(select(Profile).order_by(Profile.created_at.desc())).all()
+        assert profile_rows[0].key == "default"
+        assert profile_rows[0].name == "Default Profile"
+        assert profile_rows[0].editorial_policy["human_approval_required"] is True
+        assert profile_rows[0].editorial_policy.get("legacy_channel_identity") is None
+        workspace_id = profile_rows[0].workspace_id
+        assert db.get(Workspace, workspace_id) is not None
         duplicate_registration = client.post(
             "/api/v1/auth/register",
             headers={"Origin": "http://localhost:5173"},

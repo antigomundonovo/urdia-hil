@@ -1,8 +1,11 @@
-"""Source-of-truth defaults for the first editorial profile (Doc 00 §3)."""
+"""Source-of-truth defaults for a new editorial profile.
 
-ANM_PROFILE_KEY = "antigo_mundo_novo"
+ANM_* remains as a legacy compatibility profile for existing workspaces.
+New workspaces must not inherit a channel-specific identity.
+"""
 
-ANM_EDITORIAL_POLICY: dict = {
+DEFAULT_PROFILE_KEY = "default"
+DEFAULT_EDITORIAL_POLICY: dict = {
     "language": "pt-BR",
     "audience": "Brasil",
     "brazil_weight": 0.65,
@@ -18,3 +21,7 @@ ANM_EDITORIAL_POLICY: dict = {
     "automation_level": 2,
     "unknown_rights_block_publication": True,
 }
+
+ANM_PROFILE_KEY = "antigo_mundo_novo"
+ANM_EDITORIAL_POLICY = DEFAULT_EDITORIAL_POLICY.copy()
+ANM_EDITORIAL_POLICY["legacy_channel_identity"] = "Antigo Mundo Novo"
