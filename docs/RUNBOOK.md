@@ -49,7 +49,6 @@ python -m apps.worker --once    # processa um ciclo
 Fail-closed: payload sem os ids obrigatórios falha o job sem retry (Doc 03);
 provider indisponível/rate-limit reenfileira com checkpoint. Registro completo
 de handlers reais vs stubs: `apps/worker/handlers_new.py` (docstring) e
-`docs/CHECKPOINT_2026-10-01.md`.
 
 ## Backups (Doc 07)
 

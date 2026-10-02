@@ -63,7 +63,7 @@ o acesso da URDIA; o encerramento da sessão própria do provider só pode ser
 prometido quando a API oficial daquele provider oferecer esse recurso.
 
 O logout afeta integrações pertencentes ao usuário que saiu, não as integrações
-de outros membros do workspace. Essa regra foi aprovada no AMENDMENT-2026-09-30-008.
+de outros membros do workspace. Essa regra foi aprovada.
 
 ## URDIA account authentication
 V1 uses normalized email + password and creates a private workspace for each

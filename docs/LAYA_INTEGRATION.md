@@ -135,5 +135,3 @@ Referências consultadas:
 - Política operacional e limites: [Laya benchmarks](https://github.com/NandhaKishorM/laya/blob/main/docs/benchmarks.md),
   [confidence](https://github.com/NandhaKishorM/laya/blob/main/docs/questions-and-answers.md)
   e [staged adoption](https://github.com/NandhaKishorM/laya/blob/main/docs/staged-adoption.md).
-
-Veja também [AMENDMENT-2026-09-30-010](amendments/AMENDMENT-2026-09-30-010.md).

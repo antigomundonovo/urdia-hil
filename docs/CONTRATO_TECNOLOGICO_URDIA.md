@@ -293,7 +293,7 @@ O HIL possui padrões interessantes:
 
 Usar como referência para endurecer Auth do Studio.
 
-Não copiar cegamente. Adaptar ao contexto desktop-first.
+Não copiar cegamente. Adaptar ao contexto web-first.
 
 ---
 
@@ -421,7 +421,7 @@ Um registry de capabilities consistente ajuda:
 
 ## 7.12 Profile Architecture
 
-O HIL ainda possui vários defaults ANM/Antigo Mundo Novo.
+Profile architecture is already domain-neutral; ANM remains only a legacy profile for existing historical workspaces.
 
 Mas a estrutura de Profile é valiosa.
 
