@@ -123,8 +123,8 @@ fontes) · HANDOFF 2026-09-30 marcado como superado (aponta para este checkpoint
 
 1. ~~Emendas 001–004~~ → **RESOLVIDO**: 001 SUPERADA (auth real já existe),
    003 APROVADA (nível 2 = teto V1), 004 APROVADA (DuckDB reservado);
-   002 em aberto — dono pediu análise (anexo de encaixe no arquivo da emenda;
-   decidir A/B/C quando puder).
+   002 APROVADA (Opção C): OpenClaw/Hermes/MiroFish especificados para V2,
+   nenhum na implementação V1 (Brain+Gemini+Learning já cobrem as funções).
 2. **3–10 casos históricos reais** para benchmarks (fatos + fontes) — pendente.
 3. Quando quiser publicação por API: credenciais por rede (app Meta Business,
    conta X dev com créditos, TikTok com auditoria, Google Cloud OAuth) — uma a uma.
