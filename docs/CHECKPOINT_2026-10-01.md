@@ -2,7 +2,7 @@
 
 **Branch:** `antigomundonovo-continuar-projeto` · **Repositório:** `antigomundonovo/urdia-hil`
 **Caminho local:** `C:\urdia-hil` (único clone; antigos removidos)
-**Estado:** ruff 100% limpo · **366 testes passando, 0 falhas** · local = GitHub (`9aaf2ae`+)
+**Estado:** ruff 100% limpo · **389 testes passando, 0 falhas** · local = GitHub (`db05de1`)
 **CI:** roda em push/PR para `main` (testes + benchmarks + web). Trabalho diário validado localmente; pipeline formal via PR para main.
 
 ---
@@ -21,6 +21,7 @@
 | — | Emenda 011 | `0ed8a7a` | Plataformas definitivas (7 redes; Kwai in; Pinterest/LinkedIn/Reddit out) |
 | — | Capacidades + kit manual | `255a654` | Catálogo pesquisado (API vs MANUAL) + `MANUAL_POSTING.md` no export |
 | — | Emenda 012: BRAIN + YouTube | `9aaf2ae` | Skills modulares + recipes determinísticas + YouTubeAdapter (yt-dlp) |
+| — | Emenda 013: fronteira Studio/HIL + Social | `50ecda6..db05de1` | Contrato versionado; Factuality Challenge; Social Inbox (UHL-4); Audience Pulse/Demand (UHL-5); recovery de corrupção introduzida por ferramenta externa |
 
 ## 2. Estado do worker (fila de jobs)
 
@@ -54,6 +55,24 @@ Recipes: `prepare_publication` (scripting opcional → gate → export PENDING),
 skills por LLM só com benchmark + approval. YouTube virou fonte do discovery
 (`yt-dlp`: metadados + legendas, nunca vídeo; cookies opcionais do operador:
 `YTDLP_COOKIES_FROM_BROWSER`/`_FILE` — YouTube exige sessão p/ metadados).
+
+## 2c. Camada social (Emenda 013 — contrato Studio/HIL)
+
+HIL = Social/Audience Intelligence do ecossistema (contrato versionado em
+`docs/CONTRATO_TECNOLOGICO_URDIA.md`). Novo módulo social:
+- **FactualityChallenge** (§11): Comentário → challenge → research (fontes
+  registradas) → judge determinístico → CONFIRMED/DISPUTED/UNSUPPORTED/UNKNOWN
+  → **revisão humana** (gate). Comentário NUNCA é evidência por si.
+- **Social Inbox** (UHL-4) e **Audience Pulse/Demand** (UHL-5) implementados
+  por agente externo (OpenCode) durante o incidente; corrigidos/lintados e
+  canônicos no alembic (head 7a6095fbc454).
+- **Incidente 2026-10-02**: OpenCode commitou em paralelo (durante queda do
+  Docker) e corrompeu a migração de pulso (bytes nulos). Recuperado: migração
+  reescrita fielmente, tabelas órfãs recriadas via alembic, artefatos da
+  ferramenta em quarentena (.gitignore; nada deletado, §12.12). `.pytest_tmp`
+  local travado por processo externo — usar `--basetemp=.pytest_tmp_r`.
+- API: `POST/GET /api/v1/social/challenges` (+ research/review/dismiss),
+  `/social/inbox/*`, `/social/audience/demand|pulse`.
 
 ## 3. Plataformas (Emenda 011 + matriz 2026)
 
