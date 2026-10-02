@@ -119,10 +119,13 @@ fontes) · HANDOFF 2026-09-30 marcado como superado (aponta para este checkpoint
 4. PR/merge para `main` quando o dono quiser validar no CI.
 5. Ajuste fino de recipes conforme uso real do Brain pelo dono.
 
-## 7. Lote humano (acumulado — para o final, como combinado)
+## 7. Lote humano (atualizado 2026-10-02)
 
-1. **3–10 casos históricos reais** para benchmarks (lista simples de fatos + fontes).
-2. **Aprovação das emendas 001–004** (já pré-definidas; "sim/não" rápidos).
+1. ~~Emendas 001–004~~ → **RESOLVIDO**: 001 SUPERADA (auth real já existe),
+   003 APROVADA (nível 2 = teto V1), 004 APROVADA (DuckDB reservado);
+   002 em aberto — dono pediu análise (anexo de encaixe no arquivo da emenda;
+   decidir A/B/C quando puder).
+2. **3–10 casos históricos reais** para benchmarks (fatos + fontes) — pendente.
 3. Quando quiser publicação por API: credenciais por rede (app Meta Business,
    conta X dev com créditos, TikTok com auditoria, Google Cloud OAuth) — uma a uma.
 
