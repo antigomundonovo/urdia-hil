@@ -13,6 +13,7 @@ verdict comes from the single deterministic judge (Doc 16) — there is
 no second Judge/System 2 (contract §4).
 """
 
+import uuid
 from datetime import UTC, datetime
 
 from sqlalchemy import select
@@ -226,3 +227,113 @@ class SocialIntelligenceService:
         return list(
             self.session.scalars(stmt.order_by(FactualityChallenge.created_at.desc()))
         )
+
+    # --- social inbox --------------------------------------------------------
+
+    def create_inbox_item(
+        self,
+        ctx: ExecutionContext,
+        *,
+        item_type: str = "COMMENT",
+        comment_id: uuid.UUID | None = None,
+    ) -> "SocialInboxItem":
+        from packages.domain.social import SocialInboxItem
+
+        if ctx.profile_id is None:
+            raise SocialError("inbox items require a profile context")
+
+        item = SocialInboxItem(
+            workspace_id=ctx.workspace_id,
+            profile_id=ctx.profile_id,
+            comment_id=comment_id,
+            item_type=item_type,
+            status="UNREAD",
+        )
+        self.session.add(item)
+        self.session.flush()
+        
+        append_audit(
+            self.session,
+            ctx=ctx,
+            action="SOCIAL_INBOX_ITEM_CREATED",
+            entity_type="social_inbox_item",
+            entity_id=item.id,
+            new_state="UNREAD",
+        )
+        return item
+
+    def update_inbox_item_status(
+        self,
+        ctx: ExecutionContext,
+        item_id: uuid.UUID,
+        status: str,
+    ) -> "SocialInboxItem":
+        from packages.domain.social import SocialInboxItem
+        item = self.get_inbox_item(ctx, item_id)
+        if item is None:
+            raise SocialError("inbox item not found")
+        if status not in ("UNREAD", "OPEN", "RESOLVED", "IGNORED"):
+            raise SocialError(f"invalid status: {status}")
+
+        item.status = status
+        self.session.flush()
+
+        append_audit(
+            self.session,
+            ctx=ctx,
+            action="SOCIAL_INBOX_ITEM_UPDATED",
+            entity_type="social_inbox_item",
+            entity_id=item.id,
+            new_state=status,
+        )
+        return item
+        
+    def assign_inbox_item(
+        self,
+        ctx: ExecutionContext,
+        item_id: uuid.UUID,
+        user_id: uuid.UUID | None,
+    ) -> "SocialInboxItem":
+        from packages.domain.social import SocialInboxItem
+        item = self.get_inbox_item(ctx, item_id)
+        if item is None:
+            raise SocialError("inbox item not found")
+
+        item.assigned_to = user_id
+        if item.status == "UNREAD":
+            item.status = "OPEN"
+
+        self.session.flush()
+
+        append_audit(
+            self.session,
+            ctx=ctx,
+            action="SOCIAL_INBOX_ITEM_ASSIGNED",
+            entity_type="social_inbox_item",
+            entity_id=item.id,
+            metadata={"assigned_to": str(user_id) if user_id else None},
+        )
+        return item
+
+    def get_inbox_item(self, ctx: ExecutionContext, item_id: uuid.UUID):
+        from packages.domain.social import SocialInboxItem
+        return self.session.scalars(
+            select(SocialInboxItem).where(
+                SocialInboxItem.id == item_id,
+                SocialInboxItem.workspace_id == ctx.workspace_id,
+                SocialInboxItem.profile_id == ctx.profile_id,
+            )
+        ).first()
+
+    def list_inbox_items(self, ctx: ExecutionContext, status: str | None = None):
+        from packages.domain.social import SocialInboxItem
+        stmt = select(SocialInboxItem).where(
+            SocialInboxItem.workspace_id == ctx.workspace_id,
+            SocialInboxItem.profile_id == ctx.profile_id,
+        )
+        if status:
+            stmt = stmt.where(SocialInboxItem.status == status)
+        return list(
+            self.session.scalars(stmt.order_by(SocialInboxItem.created_at.desc()))
+        )
+

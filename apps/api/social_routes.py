@@ -158,3 +158,103 @@ def dismiss_challenge(
     except SocialError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return _challenge_out(challenge)
+
+# --- social inbox endpoints ------------------------------------------------
+
+class InboxItemCreate(BaseModel):
+    profile_id: UUID
+    comment_id: UUID | None = None
+    item_type: str = "COMMENT"
+
+class InboxItemStatusUpdate(BaseModel):
+    profile_id: UUID
+    status: str
+
+class InboxItemAssign(BaseModel):
+    profile_id: UUID
+    user_id: UUID | None = None
+
+def _inbox_item_out(item) -> dict:
+    return {
+        "id": str(item.id),
+        "comment_id": str(item.comment_id) if item.comment_id else None,
+        "item_type": item.item_type,
+        "status": item.status,
+        "assigned_to": str(item.assigned_to) if item.assigned_to else None,
+        "suggested_reply": item.suggested_reply,
+        "created_at": item.created_at.isoformat(),
+        "updated_at": item.updated_at.isoformat(),
+    }
+
+@router.post("/social/inbox")
+def create_inbox_item(
+    payload: InboxItemCreate,
+    workspace_id: UUID = Query(...),
+    session: Session = Depends(get_session),
+):
+    service = SocialIntelligenceService(session)
+    try:
+        item = service.create_inbox_item(
+            _ctx(workspace_id, payload.profile_id),
+            item_type=payload.item_type,
+            comment_id=payload.comment_id,
+        )
+        session.commit()
+    except SocialError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _inbox_item_out(item)
+
+@router.get("/social/inbox")
+def list_inbox_items(
+    workspace_id: UUID = Query(...),
+    profile_id: UUID = Query(...),
+    status: str | None = Query(None),
+    session: Session = Depends(get_session),
+):
+    if status and status not in ("UNREAD", "OPEN", "RESOLVED", "IGNORED"):
+        raise HTTPException(status_code=422, detail=f"invalid status: {status}")
+    service = SocialIntelligenceService(session)
+    items = service.list_inbox_items(_ctx(workspace_id, profile_id), status)
+    return [_inbox_item_out(i) for i in items]
+
+INBOX_STATUSES = ("UNREAD", "OPEN", "RESOLVED", "IGNORED")
+
+@router.post("/social/inbox/{item_id}/status")
+def update_inbox_item_status(
+    item_id: UUID,
+    payload: InboxItemStatusUpdate,
+    workspace_id: UUID = Query(...),
+    session: Session = Depends(get_session),
+):
+    if payload.status not in INBOX_STATUSES:
+        raise HTTPException(status_code=422, detail=f"invalid status: {payload.status}")
+    service = SocialIntelligenceService(session)
+    try:
+        item = service.update_inbox_item_status(
+            _ctx(workspace_id, payload.profile_id),
+            item_id,
+            status=payload.status,
+        )
+        session.commit()
+    except SocialError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _inbox_item_out(item)
+
+@router.post("/social/inbox/{item_id}/assign")
+def assign_inbox_item(
+    item_id: UUID,
+    payload: InboxItemAssign,
+    workspace_id: UUID = Query(...),
+    session: Session = Depends(get_session),
+):
+    service = SocialIntelligenceService(session)
+    try:
+        item = service.assign_inbox_item(
+            _ctx(workspace_id, payload.profile_id),
+            item_id,
+            user_id=payload.user_id,
+        )
+        session.commit()
+    except SocialError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _inbox_item_out(item)

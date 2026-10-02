@@ -58,3 +58,33 @@ class FactualityChallenge(Base):
         Index("ix_factuality_challenges_comment", "comment_id"),
         Index("ix_factuality_challenges_status", "status"),
     )
+
+class SocialInboxItem(Base):
+    __tablename__ = "social_inbox_items"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id"), nullable=False
+    )
+    profile_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("profiles.id"))
+    comment_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("comments.id"), nullable=True
+    )
+    # Types: COMMENT, MENTION, DM
+    item_type: Mapped[str] = mapped_column(String(32), nullable=False, default="COMMENT")
+    # Statuses: UNREAD, OPEN, RESOLVED, IGNORED
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="UNREAD")
+    assigned_to: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+    suggested_reply: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        Index("ix_social_inbox_items_workspace", "workspace_id"),
+        Index("ix_social_inbox_items_status", "status"),
+        Index("ix_social_inbox_items_comment", "comment_id"),
+    )
