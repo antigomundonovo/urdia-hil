@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from packages.domain.editorial import ContentPackage, Draft
 from packages.domain.models import Profile
 from packages.domain.publishing import Publication
 from packages.governance.audit import append_audit
@@ -335,6 +336,7 @@ def activate_rule(
 # composition hint: OpportunityService imported for ctx consistency elsewhere
 _ = OpportunityService
 
+
 class ConfirmBody(BaseModel):
     remote_id: str | None = None
 
@@ -347,32 +349,33 @@ def confirm_publication(
     session: Session = Depends(get_session),
 ):
     """AMENDMENT-007: Confirm manual EXPORT/MANUAL publication was actually posted.
-    
+
     Marks PENDING -> PUBLISHED with published_at and optional remote_id.
     Restricted to EXPORT/MANUAL method publications in PENDING status.
     Audited via existing audit trail.
     """
     pub = _publication_scoped(session, publication_id, workspace_id)
-    
+
     # Only allow confirm for manual/export methods
     if pub.method not in ("EXPORT", "MANUAL"):
         raise HTTPException(
-            status_code=409, 
-            detail=f"confirm only allowed for EXPORT/MANUAL publications, not {pub.method}"
+            status_code=409,
+            detail=f"confirm only allowed for EXPORT/MANUAL publications, not {pub.method}",
         )
-    
+
     if pub.status != "PENDING":
         raise HTTPException(
-            status_code=409, 
-            detail=f"confirm only allowed for PENDING publications, current status: {pub.status}"
+            status_code=409,
+            detail=f"confirm only allowed for PENDING publications, current status: {pub.status}",
         )
-    
+
     from datetime import UTC, datetime
+
     pub.status = "PUBLISHED"
     pub.published_at = datetime.now(UTC)
     if body.remote_id is not None:
         pub.remote_id = body.remote_id
-    
+
     session.commit()
     return {"id": str(pub.id), "status": pub.status, "published_at": pub.published_at.isoformat()}
 
@@ -380,6 +383,10 @@ def confirm_publication(
 class PublishBody(BaseModel):
     profile_id: UUID
     public_image_urls: list[str] = Field(default_factory=list)
+    public_video_url: str | None = None
+    local_video_path: str | None = None
+    privacy_level: str | None = None
+    is_aigc: bool | None = None
     caption_override: str | None = None
 
 
@@ -400,6 +407,80 @@ def publish_via_api(
     fetched; use an asset host or the manual kit).
     """
     pub = _publication_scoped(session, publication_id, workspace_id)
+
+    if pub.platform == "tiktok":
+        if pub.status != "PENDING":
+            raise HTTPException(
+                status_code=409,
+                detail=f"publish only allowed for PENDING publications, current: {pub.status}",
+            )
+        from pathlib import Path
+
+        if not body.privacy_level:
+            raise HTTPException(status_code=409, detail="TikTok privacy_level is required")
+        if not body.local_video_path and not body.public_video_url:
+            raise HTTPException(
+                status_code=409, detail="TikTok requires a video path or public video URL"
+            )
+        video_path = body.local_video_path
+        if video_path:
+            from packages.shared.settings import get_settings
+
+            root = Path(get_settings().asset_root).resolve()
+            candidate = Path(video_path).resolve()
+            if not candidate.is_relative_to(root):
+                raise HTTPException(
+                    status_code=409, detail="local video path must stay inside ASSET_ROOT"
+                )
+            video_path = str(candidate)
+        package = session.get(ContentPackage, pub.content_package_id)
+        if package is None or package.workspace_id != workspace_id:
+            raise HTTPException(status_code=404, detail="content package not found")
+        draft = session.scalars(
+            select(Draft)
+            .where(Draft.content_package_id == package.id)
+            .order_by(Draft.created_at.desc(), Draft.id.desc())
+            .limit(1)
+        ).first()
+        if draft is None:
+            raise HTTPException(status_code=409, detail="publication has no draft")
+        caption = body.caption_override or (
+            f"{draft.title}\n\n{draft.caption}" if draft.title else (draft.caption or "")
+        )
+        payload = {
+            "format": "VIDEO",
+            "caption": caption,
+            "privacy_level": body.privacy_level,
+            "is_aigc": body.is_aigc,
+        }
+        if video_path:
+            payload["video_path"] = video_path
+        else:
+            payload["video_url"] = body.public_video_url
+        from packages.providers.tiktok import TikTokPublisher, TikTokPublishError
+        from packages.shared.execution_context import ExecutionContext
+
+        try:
+            result = TikTokPublisher().publish(
+                payload, idempotency_key=pub.idempotency_key or str(pub.id)
+            )
+        except TikTokPublishError as err:
+            raise HTTPException(status_code=409, detail=str(err)) from err
+        pub.status = "PROCESSING"
+        pub.method = "API"
+        pub.remote_id = result.publish_id
+        append_audit(
+            session,
+            ctx=ExecutionContext(workspace_id=workspace_id, profile_id=pub.profile_id),
+            action="PUBLICATION_API_SUBMITTED",
+            entity_type="publication",
+            entity_id=pub.id,
+            new_state="PROCESSING",
+            metadata={"platform": "tiktok", "publish_id": result.publish_id},
+        )
+        session.commit()
+        return {"id": str(pub.id), "status": pub.status, "remote_id": pub.remote_id}
+
     if pub.platform != "instagram":
         raise HTTPException(
             status_code=409,
@@ -412,8 +493,6 @@ def publish_via_api(
         )
 
     # content: title+caption from the latest draft of the package
-    from packages.domain.editorial import ContentPackage, Draft
-
     package = session.get(ContentPackage, pub.content_package_id)
     if package is None or package.workspace_id != workspace_id:
         raise HTTPException(status_code=404, detail="content package not found")
@@ -443,9 +522,7 @@ def publish_via_api(
 
     publisher = InstagramPublisher()
     try:
-        result = publisher.publish(
-            payload, idempotency_key=pub.idempotency_key or str(pub.id)
-        )
+        result = publisher.publish(payload, idempotency_key=pub.idempotency_key or str(pub.id))
     except InstagramPublishError as err:
         raise HTTPException(status_code=409, detail=str(err)) from err
 
@@ -473,4 +550,49 @@ def publish_via_api(
         "method": "API",
         "remote_id": result.remote_id,
         "permalink": result.permalink,
+    }
+
+
+@router.post("/publications/{publication_id}/status")
+def refresh_publication_status(
+    publication_id: UUID,
+    workspace_id: UUID = Query(...),
+    session: Session = Depends(get_session),
+):
+    """Refresh asynchronous platform status after an API submission."""
+    pub = _publication_scoped(session, publication_id, workspace_id)
+    if pub.platform != "tiktok":
+        raise HTTPException(
+            status_code=409, detail="status refresh is currently available for TikTok"
+        )
+    if not pub.remote_id:
+        raise HTTPException(status_code=409, detail="publication has no TikTok publish_id")
+
+    from packages.providers.tiktok import TikTokPublisher, TikTokPublishError
+
+    try:
+        result = TikTokPublisher().status(pub.remote_id)
+    except TikTokPublishError as err:
+        raise HTTPException(status_code=409, detail=str(err)) from err
+
+    state = result["status"]
+    if state == "PUBLISH_COMPLETE":
+        pub.status = "PUBLISHED"
+        post_ids = result.get("post_ids") or []
+        if post_ids:
+            pub.remote_id = str(post_ids[0])
+        pub.published_at = datetime.now(UTC)
+    elif state == "FAILED":
+        pub.status = "FAILED"
+        pub.error = result.get("fail_reason") or "TikTok publication failed"
+    else:
+        pub.status = "PROCESSING"
+
+    session.commit()
+    return {
+        "id": str(pub.id),
+        "status": pub.status,
+        "remote_id": pub.remote_id,
+        "platform_status": state,
+        "error": pub.error,
     }
