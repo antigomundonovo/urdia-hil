@@ -100,6 +100,17 @@ def _analytics(ctx, payload):
     return _invoke_handler("apps.worker.handlers_real", "ANALYTICS_SYNC", ctx, payload)
 
 
+def _adversarial(ctx, payload):
+    if not _llm_available():
+        raise SkillError(
+            "adversarial_research requires GOOGLE_AI_API_KEY (query generator) "
+            "— configure the key or gather evidence manually"
+        )
+    return _invoke_handler(
+        "apps.worker.handlers_real", "ADVERSARIAL_RESEARCH", ctx, payload
+    )
+
+
 def _factuality_challenge(ctx, payload):
     """Run the judge over a factuality challenge (contract §11): maps the
     deterministic verdict onto the challenge. Evidence itself is gathered
@@ -188,6 +199,15 @@ def build_skill_registry() -> SkillRegistry:
             description="Exporta pacote READY; termina em PENDING p/ confirm humano",
             required_payload_keys=("package_id", "platform"),
             invoke=_publication,
+        )
+    )
+    registry.register(
+        SkillDefinition(
+            key="adversarial_research",
+            name="Adversarial Research",
+            description="Queries de refutação via LLM + candidatos p/ revisão humana",
+            required_payload_keys=(),  # claim_id OU challenge_id
+            invoke=_adversarial,
         )
     )
     registry.register(

@@ -636,3 +636,97 @@ def content_generation(
 
 
 CONTENT_GENERATION = content_generation
+
+# ---------------------------------------------------------------------------
+# ADVERSARIAL_RESEARCH (Doc 16 — LLM proposes refutation queries; system
+# searches registered engines; candidates go to HUMAN review, never to
+# the evidence table automatically)
+# ---------------------------------------------------------------------------
+def _adversarial_provider():
+    """Factory kept separate so tests can inject a fake provider."""
+    from packages.providers.gemini import GeminiProvider
+
+    return GeminiProvider()
+
+
+def adversarial_research(
+    ctx: ExecutionContext, payload: dict[str, Any], progress: JobProgress
+) -> dict:
+    """Adversarial audit for one claim (or a factuality challenge's claim).
+
+    Expected payload keys:
+      - claim_id: str   (OR)
+      - challenge_id: str (its linked claim is used)
+    """
+    claim_id = payload.get("claim_id")
+    challenge_id = payload.get("challenge_id")
+    if not claim_id and not challenge_id:
+        raise FatalJobError("adversarial_research requires claim_id or challenge_id")
+
+    progress.next("resolve_claim")
+    with SessionLocal() as session:
+        from agents import adversarial as adversarial_agent
+        from packages.domain.knowledge import Claim
+        from packages.domain.social import FactualityChallenge
+        from packages.providers.gemini import ProviderUnavailable
+        from packages.research.fetcher import SafeFetcher
+
+        if challenge_id and not claim_id:
+            challenge = session.get(
+                FactualityChallenge, uuid.UUID(str(challenge_id))
+            )
+            if (
+                challenge is None
+                or challenge.workspace_id != ctx.workspace_id
+                or challenge.profile_id != ctx.profile_id
+            ):
+                raise FatalJobError("challenge not found in profile")
+            claim_id = challenge.claim_id
+            if not claim_id:
+                raise FatalJobError("challenge has no linked claim")
+        claim = session.get(Claim, uuid.UUID(str(claim_id)))
+        if (
+            claim is None
+            or claim.workspace_id != ctx.workspace_id
+            or claim.profile_id != ctx.profile_id
+        ):
+            raise FatalJobError("claim not found in profile")
+
+        statement = (
+            claim.editorial_wording
+            or claim.normalized_text
+            or " ".join(
+                part
+                for part in (claim.subject, claim.predicate, claim.object)
+                if part
+            )
+        ).strip()
+        if not statement:
+            raise FatalJobError("claim has no usable statement text")
+
+        progress.next("generate_queries")
+        try:
+            report = adversarial_agent.run_adversarial(
+                _adversarial_provider(),
+                SafeFetcher(),
+                statement=statement,
+            )
+        except adversarial_agent.AdversarialBlocked as exc:
+            raise FatalJobError(f"adversarial research blocked: {exc}") from exc
+        except ProviderUnavailable as exc:
+            raise RetryableJobError(
+                f"llm provider unavailable: {exc}"
+            ) from exc
+
+        progress.done("generate_queries")
+        return {
+            "claim_id": str(claim.id),
+            "statement": statement,
+            "candidates": report["candidates"],
+            "queries": report["queries"],
+            "candidates_are_leads": True,
+            "awaiting_human_review": True,
+        }
+
+
+ADVERSARIAL_RESEARCH = adversarial_research

@@ -67,7 +67,7 @@ def _fake_registry(**overrides) -> object:
     return registry
 
 
-def test_real_catalog_has_the_eleven_declared_skills():
+def test_real_catalog_has_the_twelve_declared_skills():
     registry = build_skill_registry()
     assert set(registry.keys()) == {
         "research",
@@ -78,6 +78,7 @@ def test_real_catalog_has_the_eleven_declared_skills():
         "publication",
         "analytics",
         "factuality_challenge",
+        "adversarial_research",
         "visual_direction",
         "seo",
         "music",
@@ -93,6 +94,7 @@ def test_real_catalog_has_the_eleven_declared_skills():
         "publication",
         "analytics",
         "factuality_challenge",
+        "adversarial_research",
     }
     assert declared == {"visual_direction", "seo", "music"}
 

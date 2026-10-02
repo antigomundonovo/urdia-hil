@@ -92,6 +92,12 @@ RECIPE_REGISTRY: dict[str, Recipe] = {
                 "workspace_id": "$input.workspace_id",
                 "profile_id": "$input.profile_id",
             }),
+            Step(
+                skill="adversarial_research",
+                alias="adversarial",
+                input_from={"challenge_id": "$input.challenge_id"},
+                optional=True,  # skipped without GOOGLE_AI_API_KEY
+            ),
             Step(skill="factuality_challenge", alias="judged", input_from={
                 "challenge_id": "$input.challenge_id",
             }),

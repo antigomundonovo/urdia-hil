@@ -14,8 +14,7 @@ The 6 remaining stubs below are intentionally NOT implemented in V1
 (Doc 17 Core Rule: no invented features):
 - SOURCE_EXTRACTION / SOURCE_CLUSTERING: covered by the discovery scan;
   a separate pipeline would duplicate it without a spec.
-- IMAGE_RESEARCH / ADVERSARIAL_RESEARCH: require external search APIs
-  (human batch: search provider registration + benchmark, Doc 17 §15).
+- IMAGE_RESEARCH: requires an image-search provider (Doc 17 §15). 
 - VISUAL_GENERATION: Doc 13 render runs inside export_package; a standalone
   job would duplicate it without a spec.
 - PUBLICATION: automated publishing violates Amendment 007 / Doc 14 —
@@ -45,6 +44,5 @@ def _noop_handler(name: str):
 SOURCE_EXTRACTION = _noop_handler("source_extraction")
 SOURCE_CLUSTERING = _noop_handler("source_clustering")
 IMAGE_RESEARCH = _noop_handler("image_research")
-ADVERSARIAL_RESEARCH = _noop_handler("adversarial_research")
 VISUAL_GENERATION = _noop_handler("visual_generation")
 PUBLICATION = _noop_handler("publication")
