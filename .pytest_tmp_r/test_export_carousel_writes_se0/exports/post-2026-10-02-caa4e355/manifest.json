@@ -1,0 +1,165 @@
+{
+  "package_id": "caa4e355-7a74-411f-a2dc-9dcf072fda6d",
+  "opportunity_id": "173670da-f98f-42ef-a790-42b329d79827",
+  "opportunity_title": "Bondinho de 1911",
+  "format": "CAROUSEL",
+  "platform": "instagram",
+  "exported_at": "2026-10-02T16:30:00.992374+00:00",
+  "export_version": 1,
+  "rules": {
+    "rights": "rights-1.0",
+    "verification": "verification-1.0"
+  },
+  "human_approved": true,
+  "assets": [
+    {
+      "asset_id": "547b3ed4-b0ba-4e0e-8dda-a2fb2f861a58",
+      "file_included": true,
+      "filename": "547b3ed4-b0ba-4e0e-8dda-a2fb2f861a58.png",
+      "rights_record_id": "da02485a-c18b-4556-a0ae-be0131caaec7"
+    }
+  ],
+  "source_count": 1,
+  "claim_count": 1,
+  "render": {
+    "renderer_version": "renderer-1.0",
+    "template_version": "anm-still-1.0",
+    "font": {
+      "id": "pillow-load-default",
+      "version": "12.3.0"
+    },
+    "files": [
+      {
+        "path": "carousel/slide-01-hook.png",
+        "sha256": "60cc9aa4d15ad4ae9bea1283b98628533ad4808d5e2d4b23b0d2eed3517ef87f",
+        "width": 1080,
+        "height": 1350,
+        "qc": {
+          "file_integrity": "PASS",
+          "dimensions": "PASS",
+          "resolution": "PASS",
+          "aspect_ratio": "PASS",
+          "font_rendering": "PASS",
+          "overflow": "PASS",
+          "contrast": "PASS",
+          "missing_assets": "PASS",
+          "audio_duration": "N/A"
+        }
+      },
+      {
+        "path": "carousel/slide-02-orientation.png",
+        "sha256": "a005bda80b66b536d49491cd7827584d369caa2676b4c4d990f85ce86edb85a3",
+        "width": 1080,
+        "height": 1350,
+        "qc": {
+          "file_integrity": "PASS",
+          "dimensions": "PASS",
+          "resolution": "PASS",
+          "aspect_ratio": "PASS",
+          "font_rendering": "PASS",
+          "overflow": "PASS",
+          "contrast": "PASS",
+          "missing_assets": "PASS",
+          "audio_duration": "N/A"
+        }
+      },
+      {
+        "path": "carousel/slide-03-evidence.png",
+        "sha256": "6b4f7a93d155a99e22f35fae1c4e2c11172334165edc0c498ad8a9cb907f4cd7",
+        "width": 1080,
+        "height": 1350,
+        "qc": {
+          "file_integrity": "PASS",
+          "dimensions": "PASS",
+          "resolution": "PASS",
+          "aspect_ratio": "PASS",
+          "font_rendering": "PASS",
+          "overflow": "PASS",
+          "contrast": "PASS",
+          "missing_assets": "PASS",
+          "audio_duration": "N/A"
+        }
+      },
+      {
+        "path": "carousel/slide-04-context.png",
+        "sha256": "7aa98a98f0296877c6d294fcf639047256324208bbd0493eafa61d60b1516953",
+        "width": 1080,
+        "height": 1350,
+        "qc": {
+          "file_integrity": "PASS",
+          "dimensions": "PASS",
+          "resolution": "PASS",
+          "aspect_ratio": "PASS",
+          "font_rendering": "PASS",
+          "overflow": "PASS",
+          "contrast": "PASS",
+          "missing_assets": "PASS",
+          "audio_duration": "N/A"
+        }
+      },
+      {
+        "path": "carousel/slide-05-discovery.png",
+        "sha256": "64e9509263d1b6ae9583a3f2a8cab72a3da20018bbc40e92d3929a9877903194",
+        "width": 1080,
+        "height": 1350,
+        "qc": {
+          "file_integrity": "PASS",
+          "dimensions": "PASS",
+          "resolution": "PASS",
+          "aspect_ratio": "PASS",
+          "font_rendering": "PASS",
+          "overflow": "PASS",
+          "contrast": "PASS",
+          "missing_assets": "PASS",
+          "audio_duration": "N/A"
+        }
+      },
+      {
+        "path": "carousel/slide-06-meaning.png",
+        "sha256": "8bc99bfd7ea31be027ea5613a705290a5965adadce93930a7013c6b81f852f01",
+        "width": 1080,
+        "height": 1350,
+        "qc": {
+          "file_integrity": "PASS",
+          "dimensions": "PASS",
+          "resolution": "PASS",
+          "aspect_ratio": "PASS",
+          "font_rendering": "PASS",
+          "overflow": "PASS",
+          "contrast": "PASS",
+          "missing_assets": "PASS",
+          "audio_duration": "N/A"
+        }
+      },
+      {
+        "path": "carousel/slide-07-source-question.png",
+        "sha256": "2395c6e7ce1d2809bc6daacb566f8972767b6b0ce91d9ae73cd3b3a98bf5a941",
+        "width": 1080,
+        "height": 1350,
+        "qc": {
+          "file_integrity": "PASS",
+          "dimensions": "PASS",
+          "resolution": "PASS",
+          "aspect_ratio": "PASS",
+          "font_rendering": "PASS",
+          "overflow": "PASS",
+          "contrast": "PASS",
+          "missing_assets": "PASS",
+          "audio_duration": "N/A"
+        }
+      }
+    ],
+    "qc": {
+      "file_integrity": "PASS",
+      "dimensions": "PASS",
+      "resolution": "PASS",
+      "aspect_ratio": "PASS",
+      "font_rendering": "PASS",
+      "overflow": "PASS",
+      "contrast": "PASS",
+      "missing_assets": "PASS",
+      "audio_duration": "N/A"
+    },
+    "summary": "PASS"
+  }
+}

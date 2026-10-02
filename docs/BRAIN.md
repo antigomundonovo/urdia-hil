@@ -10,7 +10,7 @@
 URDIA BRAIN (executor determinístico de recipes)
 │
 ├── Planner            → Recipe declarada em código (sem LLM na V1)
-├── Skills             → 10 capacidades com contrato
+├── Skills             → 11 capacidades com contrato
 │     ↓ delegam em
 ├── Tools/Services     → handlers do worker + serviços (zero duplicação)
 ├── Sources            → discovery (rss, YouTube, crossref, arquivo…)
@@ -28,6 +28,7 @@ URDIA BRAIN (executor determinístico de recipes)
 | `platform_policy` | ✅ | `publisher_gate` (check-only) | package_id |
 | `publication` | ✅ | `EXPORT` → PENDING | package_id, platform |
 | `analytics` | ✅ | `ANALYTICS_SYNC` | publication_id, metrics |
+| `factuality_challenge` | ✅ | `SocialIntelligenceService.research_challenge` (§11) | challenge_id |
 | `visual_direction` | 📋 DECLARED | render roda no export (Doc 13) | — |
 | `seo` | 📋 DECLARED | CopywriterSEO no draft | — |
 | `music` | 📋 DECLARED | V2 (Doc 13) | — |
@@ -42,6 +43,7 @@ roda com o ExecutionContext do chamador (isolamento workspace/profile).
 | `prepare_publication` | scripting (opcional) → platform_policy → publication | `POST /api/v1/publications/{id}/confirm` |
 | `factuality_audit` | factuality | nenhum (recálculo auditado) |
 | `research_sweep` | research | nenhum (coleta não publica) |
+| `factuality_challenge` | research → factuality_challenge | `POST /api/v1/social/challenges/{id}/review` |
 
 O step `scripting` é **opcional**: sem `GOOGLE_AI_API_KEY` a recipe segue
 sem proposta de LLM (o rascunho pode ser escrito à mão na UI).

@@ -42,11 +42,22 @@ def _ctx(world):
 
 
 def test_compute_pulse(db, world):
-    comment = Comment(workspace_id=world[0].id, profile_id=world[1].id, author_ref="u1", text="Great content!", intent="POSITIVE", qualified_signal="positive")
+    comment = Comment(
+        workspace_id=world[0].id,
+        profile_id=world[1].id,
+        author_ref="u1",
+        text="Great content!",
+        intent="POSITIVE",
+        qualified_signal="positive",
+    )
     db.add(comment)
     db.commit()
     service = SocialIntelligenceService(db)
-    pulse = service.compute_pulse(_ctx(world), period_start=comment.created_at, period_end=comment.created_at)
+    pulse = service.compute_pulse(
+        _ctx(world),
+        period_start=comment.created_at,
+        period_end=comment.created_at,
+    )
     assert pulse.id is not None
     assert pulse.sentiment_score > 0
 
@@ -66,7 +77,9 @@ def test_detect_demand(db, world):
 
 def test_export_demand_for_studio(db, world):
     service = SocialIntelligenceService(db)
-    demand = service.detect_demand(_ctx(world), summary="X demand", unique_people_count=5, platforms=["instagram"])
+    demand = service.detect_demand(
+        _ctx(world), summary="X demand", unique_people_count=5, platforms=["instagram"]
+    )
     exported = service.export_demand_for_studio(_ctx(world), demand.id)
     assert exported["summary"] == "X demand"
     assert exported["unique_people_count"] == 5
@@ -74,18 +87,35 @@ def test_export_demand_for_studio(db, world):
 
 def test_api_demand_endpoint(client, db, world):
     service = SocialIntelligenceService(db)
-    service.detect_demand(_ctx(world), summary="API demand", unique_people_count=3, platforms=["instagram"])
-    resp = client.get(f"/api/v1/social/audience/demand?workspace_id={world[0].id}&profile_id={world[1].id}")
+    service.detect_demand(
+        _ctx(world), summary="API demand", unique_people_count=3, platforms=["instagram"]
+    )
+    resp = client.get(
+        f"/api/v1/social/audience/demand?workspace_id={world[0].id}&profile_id={world[1].id}"
+    )
     assert resp.status_code == 200
     assert any(d["summary"] == "API demand" for d in resp.json())
 
 
 def test_api_pulse_endpoint(client, db, world):
-    comment = Comment(workspace_id=world[0].id, profile_id=world[1].id, author_ref="u2", text="Nice!", intent="POSITIVE", qualified_signal="good")
+    comment = Comment(
+        workspace_id=world[0].id,
+        profile_id=world[1].id,
+        author_ref="u2",
+        text="Nice!",
+        intent="POSITIVE",
+        qualified_signal="good",
+    )
     db.add(comment)
     db.commit()
     service = SocialIntelligenceService(db)
-    pulse = service.compute_pulse(_ctx(world), period_start=comment.created_at, period_end=comment.created_at)
-    resp = client.get(f"/api/v1/social/audience/pulse?workspace_id={world[0].id}&profile_id={world[1].id}")
+    pulse = service.compute_pulse(
+        _ctx(world),
+        period_start=comment.created_at,
+        period_end=comment.created_at,
+    )
+    resp = client.get(
+        f"/api/v1/social/audience/pulse?workspace_id={world[0].id}&profile_id={world[1].id}"
+    )
     assert resp.status_code == 200
     assert resp.json()["sentiment_score"] == pulse.sentiment_score

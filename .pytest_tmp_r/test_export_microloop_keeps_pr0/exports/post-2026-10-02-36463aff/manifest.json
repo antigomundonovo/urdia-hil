@@ -1,0 +1,24 @@
+{
+  "package_id": "36463aff-a8bd-4e5c-b9d0-25e347a4b570",
+  "opportunity_id": "bac2b120-403f-4b20-a441-f6f588b6f424",
+  "opportunity_title": "Bondinho de 1911",
+  "format": "MICROLOOP",
+  "platform": "instagram",
+  "exported_at": "2026-10-02T16:30:01.466402+00:00",
+  "export_version": 1,
+  "rules": {
+    "rights": "rights-1.0",
+    "verification": "verification-1.0"
+  },
+  "human_approved": true,
+  "assets": [
+    {
+      "asset_id": "47e15a68-f764-47a0-aba9-bcaea5e12e50",
+      "file_included": true,
+      "filename": "47e15a68-f764-47a0-aba9-bcaea5e12e50.png",
+      "rights_record_id": "1c58d23d-42c3-4988-a6ec-e5309c25d3f0"
+    }
+  ],
+  "source_count": 1,
+  "claim_count": 1
+}

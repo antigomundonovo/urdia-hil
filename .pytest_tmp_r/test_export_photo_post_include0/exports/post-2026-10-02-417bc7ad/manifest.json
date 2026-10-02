@@ -1,0 +1,63 @@
+{
+  "package_id": "417bc7ad-2de5-4241-90ab-4e0700f33f2b",
+  "opportunity_id": "26fd94f6-6c49-407d-80a9-2514df29c77f",
+  "opportunity_title": "Bondinho de 1911",
+  "format": "PHOTO_POST",
+  "platform": "instagram",
+  "exported_at": "2026-10-02T16:30:00.375568+00:00",
+  "export_version": 1,
+  "rules": {
+    "rights": "rights-1.0",
+    "verification": "verification-1.0"
+  },
+  "human_approved": true,
+  "assets": [
+    {
+      "asset_id": "51a008b9-0ca2-4e6e-9460-d37f60dd03b8",
+      "file_included": true,
+      "filename": "51a008b9-0ca2-4e6e-9460-d37f60dd03b8.png",
+      "rights_record_id": "2f40ccf0-ea3b-464f-be5e-3a31dd716f00"
+    }
+  ],
+  "source_count": 1,
+  "claim_count": 1,
+  "render": {
+    "renderer_version": "renderer-1.0",
+    "template_version": "anm-still-1.0",
+    "font": {
+      "id": "pillow-load-default",
+      "version": "12.3.0"
+    },
+    "files": [
+      {
+        "path": "image/render-photo-post.png",
+        "sha256": "24107b6074ed6a5f6c1074a9356c491586eaf6089a03853ef45d88eb836d8abf",
+        "width": 1080,
+        "height": 1350,
+        "qc": {
+          "file_integrity": "PASS",
+          "dimensions": "PASS",
+          "resolution": "PASS",
+          "aspect_ratio": "PASS",
+          "font_rendering": "PASS",
+          "overflow": "PASS",
+          "contrast": "PASS",
+          "missing_assets": "PASS",
+          "audio_duration": "N/A"
+        }
+      }
+    ],
+    "qc": {
+      "file_integrity": "PASS",
+      "dimensions": "PASS",
+      "resolution": "PASS",
+      "aspect_ratio": "PASS",
+      "font_rendering": "PASS",
+      "overflow": "PASS",
+      "contrast": "PASS",
+      "missing_assets": "PASS",
+      "audio_duration": "N/A"
+    },
+    "summary": "PASS"
+  }
+}

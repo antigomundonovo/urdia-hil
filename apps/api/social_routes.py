@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from packages.domain.social import FactualityChallenge, AudienceDemand, AudiencePulse
+from packages.domain.social import FactualityChallenge
 from packages.research.social import (
     CHALLENGE_STATUSES,
     CHALLENGE_VERDICTS,
@@ -218,7 +218,6 @@ def list_inbox_items(
     items = service.list_inbox_items(_ctx(workspace_id, profile_id), status)
     return [_inbox_item_out(i) for i in items]
 
-INBOX_STATUSES = ("UNREAD", "OPEN", "RESOLVED", "IGNORED")
 
 @router.post("/social/inbox/{item_id}/status")
 def update_inbox_item_status(

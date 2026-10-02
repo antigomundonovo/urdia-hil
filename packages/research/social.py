@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from packages.domain.knowledge import Claim
 from packages.domain.publishing import Comment
-from packages.domain.social import FactualityChallenge
+from packages.domain.social import FactualityChallenge, SocialInboxItem
 from packages.governance.audit import append_audit
 from packages.shared.execution_context import ExecutionContext
 
@@ -239,7 +239,6 @@ class SocialIntelligenceService:
         item_type: str = "COMMENT",
         comment_id: uuid.UUID | None = None,
     ) -> "SocialInboxItem":
-        from packages.domain.social import SocialInboxItem
 
         if ctx.profile_id is None:
             raise SocialError("inbox items require a profile context")
@@ -270,7 +269,6 @@ class SocialIntelligenceService:
         item_id: uuid.UUID,
         status: str,
     ) -> "SocialInboxItem":
-        from packages.domain.social import SocialInboxItem
         item = self.get_inbox_item(ctx, item_id)
         if item is None:
             raise SocialError("inbox item not found")
@@ -296,7 +294,6 @@ class SocialIntelligenceService:
         item_id: uuid.UUID,
         user_id: uuid.UUID | None,
     ) -> "SocialInboxItem":
-        from packages.domain.social import SocialInboxItem
         item = self.get_inbox_item(ctx, item_id)
         if item is None:
             raise SocialError("inbox item not found")
@@ -318,7 +315,6 @@ class SocialIntelligenceService:
         return item
 
     def get_inbox_item(self, ctx: ExecutionContext, item_id: uuid.UUID):
-        from packages.domain.social import SocialInboxItem
         return self.session.scalars(
             select(SocialInboxItem).where(
                 SocialInboxItem.id == item_id,
@@ -328,7 +324,6 @@ class SocialIntelligenceService:
         ).first()
 
     def list_inbox_items(self, ctx: ExecutionContext, status: str | None = None):
-        from packages.domain.social import SocialInboxItem
         stmt = select(SocialInboxItem).where(
             SocialInboxItem.workspace_id == ctx.workspace_id,
             SocialInboxItem.profile_id == ctx.profile_id,
@@ -343,8 +338,8 @@ class SocialIntelligenceService:
     # --- audience pulse & demand bridge ---------------------------------------
 
     def compute_pulse(self, ctx: ExecutionContext, period_start, period_end):
-        from packages.domain.social import AudiencePulse
         from packages.domain.publishing import Comment
+        from packages.domain.social import AudiencePulse
 
         stmt = select(Comment).where(
             Comment.workspace_id == ctx.workspace_id,
@@ -359,7 +354,10 @@ class SocialIntelligenceService:
         clusters = {}
         for c in comments:
             if c.qualified_signal:
-                sentiment_sum += 0.1 if c.intent and "POSITIVE" in c.intent.upper() else -0.1 if "NEGATIVE" in c.intent.upper() else 0.0
+                intent_upper = (c.intent or "").upper()
+                sentiment_sum += 0.1 if "POSITIVE" in intent_upper else (
+                    -0.1 if "NEGATIVE" in intent_upper else 0.0
+                )
                 key = c.qualified_signal
                 if key in clusters:
                     clusters[key]["count"] += 1
@@ -422,7 +420,6 @@ class SocialIntelligenceService:
         return demand
 
     def export_demand_for_studio(self, ctx: ExecutionContext, demand_id: uuid.UUID):
-        from packages.domain.social import AudienceDemand
         demand = self.get_demand(ctx, demand_id)
         if demand is None:
             raise SocialError("demand not found")

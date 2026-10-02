@@ -1,0 +1,19 @@
+{
+  "claims": [
+    {
+      "claim_id": "e13047e5-8aaf-4f74-988b-72f1a7250406",
+      "text": "Bondinho iniciou em 1911",
+      "status": "POSSIBLE"
+    }
+  ],
+  "evidence": [
+    {
+      "evidence_id": "075be5e0-44cf-4c67-8074-53e0e843bb0f",
+      "claim_id": "e13047e5-8aaf-4f74-988b-72f1a7250406",
+      "source_id": "ba5e4b07-0bbc-4e44-9a41-b43303e355be",
+      "supports": true,
+      "excerpt": null,
+      "page_reference": null
+    }
+  ]
+}

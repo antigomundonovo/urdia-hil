@@ -47,3 +47,10 @@ Thumbs.db
 .pytest_tmp/
 .pytest_tmp/
 backups/
+
+# Ferramenta externa OpenCode (artefatos de operação — nunca versionar)
+roster.json
+roster-backups/
+hive
+restore-gate.json
+worktrees/
