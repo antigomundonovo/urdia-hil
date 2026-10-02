@@ -12,10 +12,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from packages.domain.social import FactualityChallenge
+from packages.domain.social import FactualityChallenge, AudienceDemand, AudiencePulse
 from packages.research.social import (
     CHALLENGE_STATUSES,
     CHALLENGE_VERDICTS,
+    INBOX_STATUSES,
     SocialError,
     SocialIntelligenceService,
 )
@@ -258,3 +259,38 @@ def assign_inbox_item(
     except SocialError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return _inbox_item_out(item)
+
+@router.get("/social/audience/demand")
+def list_audience_demand(
+    workspace_id: UUID = Query(...),
+    profile_id: UUID = Query(...),
+    session: Session = Depends(get_session),
+):
+    service = SocialIntelligenceService(session)
+    demands = service.list_audience_demand(_ctx(workspace_id, profile_id))
+    return [
+        {
+            "id": str(d.id),
+            "summary": d.summary,
+            "unique_people_count": d.unique_people_count,
+            "growth": d.growth,
+            "confidence": d.confidence,
+        }
+        for d in demands
+    ]
+
+@router.get("/social/audience/pulse")
+def get_audience_pulse(
+    workspace_id: UUID = Query(...),
+    profile_id: UUID = Query(...),
+    session: Session = Depends(get_session),
+):
+    service = SocialIntelligenceService(session)
+    pulse = service.get_latest_audience_pulse(_ctx(workspace_id, profile_id))
+    if not pulse:
+        raise HTTPException(status_code=404, detail="No pulse data found")
+    return {
+        "id": str(pulse.id),
+        "sentiment_score": pulse.sentiment_score,
+        "topic_clusters": pulse.topic_clusters,
+    }

@@ -88,3 +88,47 @@ class SocialInboxItem(Base):
         Index("ix_social_inbox_items_status", "status"),
         Index("ix_social_inbox_items_comment", "comment_id"),
     )
+
+
+class AudienceDemand(Base):
+    __tablename__ = "audience_demands"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id"), nullable=False
+    )
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    evidence: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    unique_people_count: Mapped[int] = mapped_column(nullable=False, default=0)
+    growth: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    engagement: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    platforms: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
+    confidence: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    editorial_fit: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        Index("ix_audience_demands_workspace", "workspace_id"),
+    )
+
+
+class AudiencePulse(Base):
+    __tablename__ = "audience_pulses"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id"), nullable=False
+    )
+    period_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    period_end: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    sentiment_score: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    topic_clusters: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        Index("ix_audience_pulses_workspace", "workspace_id"),
+    )

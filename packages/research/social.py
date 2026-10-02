@@ -40,6 +40,8 @@ CHALLENGE_STATUSES = ("PROPOSED", "RESOLVED", "DISMISSED")
 CHALLENGE_VERDICTS = ("CONFIRMED", "DISPUTED", "UNSUPPORTED", "UNKNOWN")
 
 
+INBOX_STATUSES = ("UNREAD", "OPEN", "RESOLVED", "IGNORED")
+
 class SocialError(Exception):
     """Fail closed on social intelligence rule violations."""
 
@@ -337,3 +339,149 @@ class SocialIntelligenceService:
             self.session.scalars(stmt.order_by(SocialInboxItem.created_at.desc()))
         )
 
+
+    # --- audience pulse & demand bridge ---------------------------------------
+
+    def compute_pulse(self, ctx: ExecutionContext, period_start, period_end):
+        from packages.domain.social import AudiencePulse
+        from packages.domain.publishing import Comment
+
+        stmt = select(Comment).where(
+            Comment.workspace_id == ctx.workspace_id,
+            Comment.profile_id == ctx.profile_id,
+            Comment.created_at >= period_start,
+            Comment.created_at <= period_end,
+        )
+        comments = list(self.session.scalars(stmt))
+        total = len(comments)
+
+        sentiment_sum = 0.0
+        clusters = {}
+        for c in comments:
+            if c.qualified_signal:
+                sentiment_sum += 0.1 if c.intent and "POSITIVE" in c.intent.upper() else -0.1 if "NEGATIVE" in c.intent.upper() else 0.0
+                key = c.qualified_signal
+                if key in clusters:
+                    clusters[key]["count"] += 1
+                else:
+                    clusters[key] = {"count": 1, "sample": c.text[:100] if c.text else ""}
+
+        score = sentiment_sum / total if total > 0 else 0.0
+        pulse = AudiencePulse(
+            workspace_id=ctx.workspace_id,
+            period_start=period_start,
+            period_end=period_end,
+            sentiment_score=round(score, 4),
+            topic_clusters=clusters,
+        )
+        self.session.add(pulse)
+        self.session.flush()
+        append_audit(
+            self.session,
+            ctx=ctx,
+            action="SOCIAL_PULSE_COMPUTED",
+            entity_type="audience_pulse",
+            entity_id=pulse.id,
+            new_state="GENERATED",
+            metadata={"comment_count": total},
+        )
+        return pulse
+
+    def detect_demand(
+        self,
+        ctx: ExecutionContext,
+        *,
+        summary: str,
+        unique_people_count: int,
+        platforms: list[str],
+        evidence: dict | None = None,
+    ):
+        from packages.domain.social import AudienceDemand
+
+        demand = AudienceDemand(
+            workspace_id=ctx.workspace_id,
+            summary=summary,
+            evidence=evidence or {},
+            unique_people_count=unique_people_count,
+            growth=0.0,
+            engagement=0.0,
+            platforms=platforms,
+            confidence=0.0,
+            editorial_fit=0.0,
+        )
+        self.session.add(demand)
+        self.session.flush()
+        append_audit(
+            self.session,
+            ctx=ctx,
+            action="SOCIAL_DEMAND_DETECTED",
+            entity_type="audience_demand",
+            entity_id=demand.id,
+            new_state="DETECTED",
+        )
+        return demand
+
+    def export_demand_for_studio(self, ctx: ExecutionContext, demand_id: uuid.UUID):
+        from packages.domain.social import AudienceDemand
+        demand = self.get_demand(ctx, demand_id)
+        if demand is None:
+            raise SocialError("demand not found")
+        return {
+            "id": str(demand.id),
+            "summary": demand.summary,
+            "evidence": demand.evidence,
+            "unique_people_count": demand.unique_people_count,
+            "growth": demand.growth,
+            "engagement": demand.engagement,
+            "platforms": demand.platforms,
+            "confidence": demand.confidence,
+            "editorial_fit": demand.editorial_fit,
+            "created_at": demand.created_at.isoformat(),
+        }
+
+    def get_demand(self, ctx: ExecutionContext, demand_id: uuid.UUID):
+        from packages.domain.social import AudienceDemand
+        return self.session.scalars(
+            select(AudienceDemand).where(
+                AudienceDemand.id == demand_id,
+                AudienceDemand.workspace_id == ctx.workspace_id,
+            )
+        ).first()
+
+    def list_audience_demand(self, ctx: ExecutionContext):
+        from packages.domain.social import AudienceDemand
+        stmt = select(AudienceDemand).where(
+            AudienceDemand.workspace_id == ctx.workspace_id
+        )
+        return list(self.session.scalars(stmt.order_by(AudienceDemand.created_at.desc())))
+
+    def get_latest_audience_pulse(self, ctx: ExecutionContext):
+        from packages.domain.social import AudiencePulse
+        return self.session.scalars(
+            select(AudiencePulse).where(
+                AudiencePulse.workspace_id == ctx.workspace_id
+            ).order_by(AudiencePulse.created_at.desc()).limit(1)
+        ).first()
+
+    def list_demands(self, ctx: ExecutionContext):
+        from packages.domain.social import AudienceDemand
+        stmt = select(AudienceDemand).where(
+            AudienceDemand.workspace_id == ctx.workspace_id
+        )
+        return list(self.session.scalars(stmt.order_by(AudienceDemand.created_at.desc())))
+
+    def get_pulse(self, ctx: ExecutionContext, pulse_id: uuid.UUID):
+        from packages.domain.social import AudiencePulse
+        return self.session.scalars(
+            select(AudiencePulse).where(
+                AudiencePulse.id == pulse_id,
+                AudiencePulse.workspace_id == ctx.workspace_id,
+            )
+        ).first()
+
+    def list_pulses(self, ctx: ExecutionContext):
+        from packages.domain.social import AudiencePulse
+        stmt = select(AudiencePulse).where(
+            AudiencePulse.workspace_id == ctx.workspace_id
+        )
+        return list(self.session.scalars(stmt.order_by(AudiencePulse.created_at.desc())))
