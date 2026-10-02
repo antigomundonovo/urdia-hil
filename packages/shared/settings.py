@@ -54,6 +54,13 @@ class Settings(BaseSettings):
     yt_dlp_cookies_from_browser: str | None = None
     yt_dlp_cookies_file: str | None = None
 
+    # Instagram live publishing (Doc 14 API method; credentials from the
+    # Meta app "URDIA-Media - IG"). Secrets never repr'd/logged (Doc 08).
+    meta_app_id: str = ""
+    meta_app_secret: str = Field(default="", repr=False)
+    meta_instagram_token: str = Field(default="", repr=False)
+    meta_instagram_token_expires_at: str | None = None
+
     @property
     def cors_origin_list(self) -> list[str]:
         """Doc 08: CORS por allowlist, nunca wildcard."""

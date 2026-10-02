@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from packages.domain.models import Profile
 from packages.domain.publishing import Publication
+from packages.governance.audit import append_audit
 from packages.research.analytics import AnalyticsService
 from packages.research.learning import LearningError, LearningService
 from packages.research.opportunity import OpportunityService
@@ -374,3 +375,102 @@ def confirm_publication(
     
     session.commit()
     return {"id": str(pub.id), "status": pub.status, "published_at": pub.published_at.isoformat()}
+
+
+class PublishBody(BaseModel):
+    profile_id: UUID
+    public_image_urls: list[str] = Field(default_factory=list)
+    caption_override: str | None = None
+
+
+@router.post("/publications/{publication_id}/publish")
+def publish_via_api(
+    publication_id: UUID,
+    body: PublishBody,
+    workspace_id: UUID = Query(...),
+    session: Session = Depends(get_session),
+):
+    """Publish a PENDING publication through the platform's live API
+    (AMENDMENT-014: first live adapter = Instagram).
+
+    Human gate: this route IS the human action (Emenda 007 — nothing
+    publishes by itself). Requires READY-gated content (publisher gate ran
+    at export), a PENDING publication, and PUBLIC image URLs (the
+    Instagram API fetches the image itself — local-first files cannot be
+    fetched; use an asset host or the manual kit).
+    """
+    pub = _publication_scoped(session, publication_id, workspace_id)
+    if pub.platform != "instagram":
+        raise HTTPException(
+            status_code=409,
+            detail=f"no live API adapter for platform {pub.platform} (manual kit available)",
+        )
+    if pub.status != "PENDING":
+        raise HTTPException(
+            status_code=409,
+            detail=f"publish only allowed for PENDING publications, current: {pub.status}",
+        )
+
+    # content: title+caption from the latest draft of the package
+    from packages.domain.editorial import ContentPackage, Draft
+
+    package = session.get(ContentPackage, pub.content_package_id)
+    if package is None or package.workspace_id != workspace_id:
+        raise HTTPException(status_code=404, detail="content package not found")
+    draft = session.scalars(
+        select(Draft)
+        .where(Draft.content_package_id == package.id)
+        .order_by(Draft.created_at.desc(), Draft.id.desc())
+        .limit(1)
+    ).first()
+    if draft is None:
+        raise HTTPException(status_code=409, detail="publication has no draft")
+
+    caption = body.caption_override or (
+        f"{draft.title}\n\n{draft.caption}" if draft.title else (draft.caption or "")
+    )
+    payload = {
+        "format": package.format if package.format in ("PHOTO_POST", "CAROUSEL") else "PHOTO_POST",
+        "caption": caption,
+        "image_urls": body.public_image_urls,
+    }
+
+    from packages.providers.instagram import (
+        InstagramPublisher,
+        InstagramPublishError,
+    )
+    from packages.shared.execution_context import ExecutionContext
+
+    publisher = InstagramPublisher()
+    try:
+        result = publisher.publish(
+            payload, idempotency_key=pub.idempotency_key or str(pub.id)
+        )
+    except InstagramPublishError as err:
+        raise HTTPException(status_code=409, detail=str(err)) from err
+
+    pub.status = "PUBLISHED"
+    pub.method = "API"
+    pub.published_at = datetime.now(UTC)
+    pub.remote_id = result.remote_id
+    append_audit(
+        session,
+        ctx=ExecutionContext(workspace_id=workspace_id, profile_id=pub.profile_id),
+        action="PUBLICATION_API_PUBLISHED",
+        entity_type="publication",
+        entity_id=pub.id,
+        new_state="PUBLISHED",
+        metadata={
+            "platform": pub.platform,
+            "remote_id": result.remote_id,
+            "permalink": result.permalink,
+        },
+    )
+    session.commit()
+    return {
+        "id": str(pub.id),
+        "status": pub.status,
+        "method": "API",
+        "remote_id": result.remote_id,
+        "permalink": result.permalink,
+    }

@@ -12,7 +12,7 @@
 
 | Plataforma | Método-alvo | API oficial de publicação | Bloqueio atual |
 |---|---|---|---|
-| Instagram | **API** | ✅ Graph API Content Publishing | credenciais (app Meta Business + conta Business/Creator) |
+| Instagram | **API — ADAPTER ATIVO** 🟢 | ✅ graph.instagram.com (photo/carousel) | credenciais OK (URDIA-Media - IG); publicação exige imagem em **URL pública** |
 | Facebook | **API** | ✅ Graph API (páginas) | credenciais (app Meta + permissões de página) |
 | X (Twitter) | **API** | ✅ API v2 (pay-per-use) | conta de dev + créditos (~US$ 0,015/post; US$ 0,20 com link) |
 | Threads | **API** | ✅ Threads API (2 passos) | credenciais (app Threads OAuth) |
@@ -59,6 +59,16 @@
 3. Mudar o plano de plataforma invalida o QC anterior (Doc 14) — novo QC antes de exportar.
 4. Tokens/credenciais ficam só no backend, por referência opaca (Doc 14/08).
 5. Troca de provider/adaptador exige benchmark + regression + registro em `docs/PROVIDERS.md` (Doc 17 §9/§15).
+
+## Estado de implementação (2026-10-02)
+
+- **Instagram: PRIMEIRO ADAPTER AO VIVO** — `packages/providers/instagram.py`
+  (photo + carousel via 2-step container/publish), token long-lived no `.env`
+  (renovável via `ig_refresh_token`; expiração anotada em
+  `META_INSTAGRAM_TOKEN_EXPIRES_AT`). Rota humana:
+  `POST /api/v1/publications/{id}/publish` com `public_image_urls`
+  (o Instagram baixa a imagem de uma URL pública — arquivos locais não
+  servem; sem URL pública, o kit manual segue disponível).
 
 ## Fontes (consultadas em 2026-10-01)
 
