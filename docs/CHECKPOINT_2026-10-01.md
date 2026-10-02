@@ -69,8 +69,9 @@ HIL = Social/Audience Intelligence do ecossistema (contrato versionado em
 - **Incidente 2026-10-02**: OpenCode commitou em paralelo (durante queda do
   Docker) e corrompeu a migração de pulso (bytes nulos). Recuperado: migração
   reescrita fielmente, tabelas órfãs recriadas via alembic, artefatos da
-  ferramenta em quarentena (.gitignore; nada deletado, §12.12). `.pytest_tmp`
-  local travado por processo externo — usar `--basetemp=.pytest_tmp_r`.
+  ferramenta em quarentena (.gitignore; nada deletado, §12.12). RESOLVIDO
+  (4f6f079): basetemp fixo removido do repo — pytest usa temp isolado fora
+  do pytest-of; posicionamento do produto: **WEB-first** (README).
 - API: `POST/GET /api/v1/social/challenges` (+ research/review/dismiss),
   `/social/inbox/*`, `/social/audience/demand|pulse`.
 
