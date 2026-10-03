@@ -4,7 +4,7 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from apps.api.analytics_routes import router as analytics_router
-from apps.api.auth import require_workspace_access
+from apps.api.auth import get_current_user, require_workspace_access
 from apps.api.auth_routes import router as auth_router
 from apps.api.content_routes import router as content_router
 from apps.api.jobs_routes import router as jobs_router
@@ -13,6 +13,7 @@ from apps.api.profiles_routes import router as profiles_router
 from apps.api.registry_routes import router as registry_router
 from apps.api.social_routes import router as social_router
 from apps.api.sources_routes import router as sources_router
+from apps.api.tiktok_routes import router as tiktok_router
 from packages.domain.enums import HealthState
 from packages.shared.db import engine
 from packages.shared.settings import get_settings
@@ -34,6 +35,7 @@ app.include_router(sources_router, dependencies=[Depends(require_workspace_acces
 app.include_router(content_router, dependencies=[Depends(require_workspace_access)])
 app.include_router(analytics_router, dependencies=[Depends(require_workspace_access)])
 app.include_router(social_router, dependencies=[Depends(require_workspace_access)])
+app.include_router(tiktok_router, dependencies=[Depends(get_current_user)])
 
 
 @app.get("/api/v1/health")

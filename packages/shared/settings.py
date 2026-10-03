@@ -62,7 +62,10 @@ class Settings(BaseSettings):
     meta_instagram_token_expires_at: str | None = None
 
     # TikTok Content Posting API. User access token is secret and never repr/logged.
+    tiktok_client_key: str = ""
+    tiktok_client_secret: str = Field(default="", repr=False)
     tiktok_access_token: str = Field(default="", repr=False)
+    tiktok_open_id: str | None = None
 
     @property
     def cors_origin_list(self) -> list[str]:
