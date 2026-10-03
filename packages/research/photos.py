@@ -71,7 +71,7 @@ def perceptual_hash(content: bytes, size: int = 16) -> str | None:
 
         with Image.open(io.BytesIO(content)) as image:
             gray = image.convert("L").resize((size, size))
-        pixels = list(gray.getdata())
+        pixels = list(gray.get_flattened_data())
         average = sum(pixels) / len(pixels)
         bits = "".join("1" if p > average else "0" for p in pixels)
         return f"{int(bits, 2):016x}"
