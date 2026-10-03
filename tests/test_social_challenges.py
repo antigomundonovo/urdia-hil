@@ -264,3 +264,20 @@ def test_api_rejects_invalid_verdict(client, db, world):
     )
     # comment does not exist -> 409 fail closed
     assert resp.status_code == 409
+
+
+def test_create_challenge_rejects_profile_from_other_workspace(db, world):
+    comment = _comment(db, world)
+    foreign_ws = Workspace(name=f"foreign-{uuid.uuid4().hex[:8]}")
+    db.add(foreign_ws)
+    db.flush()
+    foreign_profile = Profile(workspace_id=foreign_ws.id, key="foreign", name="Foreign")
+    db.add(foreign_profile)
+    db.commit()
+
+    with pytest.raises(SocialError, match="profile not found in workspace"):
+        SocialIntelligenceService(db).create_challenge(
+            _ctx((world[0], foreign_profile)),
+            comment_id=comment.id,
+            statement="foreign context must fail",
+        )
