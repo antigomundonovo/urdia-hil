@@ -55,6 +55,7 @@ class FactualityChallenge(Base):
 
     __table_args__ = (
         Index("ix_factuality_challenges_workspace", "workspace_id"),
+        Index("ix_factuality_challenges_profile", "profile_id"),
         Index("ix_factuality_challenges_comment", "comment_id"),
         Index("ix_factuality_challenges_status", "status"),
     )
@@ -85,6 +86,7 @@ class SocialInboxItem(Base):
 
     __table_args__ = (
         Index("ix_social_inbox_items_workspace", "workspace_id"),
+        Index("ix_social_inbox_items_profile", "profile_id"),
         Index("ix_social_inbox_items_status", "status"),
         Index("ix_social_inbox_items_comment", "comment_id"),
     )
