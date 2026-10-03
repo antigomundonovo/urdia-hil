@@ -154,3 +154,62 @@ def connection_status(user: User = Depends(get_current_user)) -> dict:
         "platform": "tiktok",
         "publish_method": "API (sandbox until app review approves)",
     }
+
+
+@router.get("/callback")
+def callback_exchange(
+    code: str = "",
+    state: str = "",
+    user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> dict:
+    """Direct landing for the operator: paste- or click-through the code from
+    the public callback page and connect in one step (demo-friendly)."""
+    if not code:
+        raise HTTPException(status_code=422, detail="missing ?code=")
+    s = _settings()
+    if not s.tiktok_client_key or not s.tiktok_client_secret:
+        raise HTTPException(
+            status_code=409,
+            detail="tiktok: TIKTOK_CLIENT_KEY/SECRET are not configured in .env",
+        )
+    try:
+        r = httpx.post(
+            TOKEN_URL,
+            data={
+                "client_key": s.tiktok_client_key,
+                "client_secret": s.tiktok_client_secret,
+                "code": code,
+                "grant_type": "authorization_code",
+                "redirect_uri": CALLBACK_URL,
+            },
+            headers={"content-type": "application/x-www-form-urlencoded"},
+            timeout=30,
+        )
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502, detail=f"tiktok: network error {exc.__class__.__name__}"
+        ) from exc
+    data = r.json() if r.status_code == 200 else {}
+    if r.status_code != 200 or not data.get("access_token"):
+        try:
+            error_body = r.json()
+        except Exception:
+            error_body = {}
+        message = (
+            error_body.get("error_description")
+            or error_body.get("error")
+            or error_body.get("message")
+            or f"HTTP {r.status_code}"
+        )
+        raise HTTPException(status_code=409, detail=f"tiktok exchange failed: {message}")
+    _persist_env_var("TIKTOK_ACCESS_TOKEN", str(data["access_token"]))
+    open_id = str(data.get("open_id", ""))
+    if open_id:
+        _persist_env_var("TIKTOK_OPEN_ID", open_id)
+    return {
+        "status": "connected",
+        "open_id": open_id,
+        "scope": data.get("scope"),
+        "note": "TikTok connected — sandbox posts stay private until app review approves",
+    }
