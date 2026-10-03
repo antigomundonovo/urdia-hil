@@ -157,12 +157,10 @@ def connection_status(user: User = Depends(get_current_user)) -> dict:
 
 
 @router.get("/callback")
-def callback_exchange(
-    code: str = "",
-    state: str = "",
-    user: User = Depends(get_current_user),
-    session: Session = Depends(get_session),
-) -> dict:
+def callback_exchange(code: str = "", state: str = "") -> dict:
+    """No session required: this is the OAuth redirect landing on the
+    operator's own machine — the short-lived single-use code IS the
+    authorization (local-first desktop pattern)."""
     """Direct landing for the operator: paste- or click-through the code from
     the public callback page and connect in one step (demo-friendly)."""
     if not code:
