@@ -81,6 +81,10 @@ unknown_rights_block_publication: true
 
 65/35 é prioridade de descoberta, não cota rígida de publicação.
 
+## OVERRIDE DE ESCOPO — EMENDA 013
+
+As seções históricas abaixo deste documento são preservadas para rastreabilidade da evolução do produto, mas **não definem o escopo ativo do HIL**. Para implementação atual, a **Emenda 013** e o documento CONTRATO_TECNOLOGICO_URDIA.md prevalecem: HIL é Social/Audience Intelligence; o URDIA Studio é o proprietário do pipeline de vídeo. Nenhum código novo deve tratar o perfil histórico legado como identidade estrutural do produto.
+
 # 4. ESCOPO
 
 Pode abranger história do Brasil e do mundo, pessoas famosas e comuns, guerras, diplomacia, arqueologia, ciência, tecnologia, medicina histórica, arquitetura, cidades, objetos, documentos, fotografias, arte, literatura, música, costumes, alimentação, vestuário, indústria, transporte, patrimônio, mistérios documentados, história da ciência, história recente com valor documental e What If explicitamente identificado.
