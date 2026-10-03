@@ -1,6 +1,6 @@
-# URDIA — History Intelligence Layer (HIL)
+# URDIA-HIL — Social & Audience Intelligence
 
-Motor de **Inteligência Editorial Histórica**. Produto inicial: **Antigo Mundo Novo**.
+Camada de **Inteligência Social e de Audiência** do ecossistema URDIA. O HIL trata comentários, Social Inbox, triagem, demanda, feedback, oportunidades, Audience Pulse, Response Debt e factuality challenges, mantendo uma fronteira explícita com o URDIA Studio, que é responsável pelo pipeline de vídeo.
 
 > **DESCUBRA MUITO. AFIRME POUCO. PROVE O QUE AFIRMAR. MOSTRE O QUE NÃO SABE. CONTE SOMENTE O QUE MERECE SER CONTADO. APRENDA COM O RESULTADO.**
 
@@ -8,13 +8,13 @@ Motor de **Inteligência Editorial Histórica**. Produto inicial: **Antigo Mundo
 
 ## O que é
 
-O HIL não é um gerador simples de posts. É um pipeline editorial completo:
+O HIL não é um gerador de vídeo nem uma cópia do Studio. Ele é a camada social/audience que transforma sinais da audiência em informação estruturada e auditável:
 
 ```text
-DESCOBRIR → PESQUISAR → ORGANIZAR → CONFRONTAR → VERIFICAR → ENTENDER → DECIDIR → CRIAR → ADAPTAR → PUBLICAR → MEDIR → APRENDER
+AUDIÊNCIA → COMENTÁRIOS → TRIAGEM → DEMANDA → FEEDBACK → INTELIGÊNCIA → DECISÃO HUMANA → STUDIO/HIL
 ```
 
-Nunca considerar LLM output como fato por si só. O sistema tem capacidade explícita de `NÃO PUBLICAR`.
+Nunca considerar comentário ou saída de LLM como evidência por si só. O sistema preserva a capacidade explícita de `NÃO PUBLICAR` e exige revisão humana para decisões externas.
 
 ## Fonte de verdade
 
