@@ -354,6 +354,7 @@ def activate_rule(
     workspace_id: UUID = Query(...),
     profile_id: UUID = Query(...),
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     _profile_scoped(session, workspace_id, profile_id)
     from packages.domain.publishing import Rule
@@ -362,8 +363,15 @@ def activate_rule(
     if rule is None or rule.workspace_id != workspace_id:
         raise HTTPException(status_code=404, detail="rule not found")
     try:
+        from packages.shared.execution_context import ExecutionContext
+
         active = LearningService(session).activate_rule(
-            _ctx_for(session, workspace_id, profile_id), rule
+            ExecutionContext(
+                workspace_id=workspace_id,
+                profile_id=profile_id,
+                actor_id=current_user.id,
+            ),
+            rule,
         )
     except LearningError as err:
         raise HTTPException(status_code=409, detail=str(err)) from err

@@ -10,10 +10,12 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from packages.domain.enums import JobType
-from packages.domain.models import Profile
+from apps.api.auth import get_current_user
+from packages.domain.models import Profile, User, WorkspaceMember
 from packages.domain.repositories import JobRepository, SourceRepository
 from packages.research.adapters import SUPPORTED_SOURCE_TYPES
 from packages.research.discovery import canonicalize_url
@@ -76,8 +78,16 @@ def create_source(
     body: SourceCreate,
     workspace_id: UUID = Query(...),
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     _profile_scoped(session, workspace_id, profile_id)
+    if session.scalar(
+        select(WorkspaceMember.id).where(
+            WorkspaceMember.workspace_id == workspace_id,
+            WorkspaceMember.user_id == current_user.id,
+        )
+    ) is None:
+        raise HTTPException(status_code=404, detail="workspace not found")
     if body.source_type not in ALLOWED_SOURCE_TYPES:
         raise HTTPException(status_code=422, detail="unknown source_type")
     source = SourceRepository(session).create(
@@ -111,6 +121,7 @@ def retrieve_source(
     source_id: UUID,
     workspace_id: UUID = Query(...),
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     source = SourceRepository(session).get_scoped(source_id, workspace_id)
     if source is None:

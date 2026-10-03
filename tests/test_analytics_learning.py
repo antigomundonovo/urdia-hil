@@ -196,7 +196,12 @@ def test_rule_cannot_activate_without_human_review(db, world):
     db.add(WorkspaceMember(workspace_id=ws.id, user_id=reviewer.id))
     db.flush()
     learning.review_rule(ctx, rule, reviewed_by=reviewer.id, notes="concordo")
-    learning.activate_rule(ctx, rule)
+    with pytest.raises(LearningError, match="authenticated actor"):
+        learning.activate_rule(ctx, rule)
+    ctx_with_actor = ExecutionContext(
+        workspace_id=ws.id, profile_id=profile.id, actor_id=reviewer.id
+    )
+    learning.activate_rule(ctx_with_actor, rule)
     assert rule.status == "ACTIVE"
 
 
@@ -223,6 +228,37 @@ def test_api_rule_review_attributes_authenticated_actor(client, db, world):
     db.refresh(rule)
     assert rule.reviewed_by == actor.id
     assert rule.reviewed_by != spoofed.id
+
+
+def test_api_rule_activation_attributes_authenticated_actor(client, db, world):
+    ws, profile = world
+    service = LearningService(db)
+    rule = service.propose_rule(_ctx(ws, profile), statement="API activation actor")
+    actor = User(name="API Activator", email=f"api-activator-{uuid.uuid4().hex[:8]}@example.test")
+    db.add(actor)
+    db.flush()
+    db.add(WorkspaceMember(workspace_id=ws.id, user_id=actor.id))
+    db.flush()
+    service.review_rule(_ctx(ws, profile), rule, reviewed_by=actor.id)
+
+    from apps.api.auth import get_current_user
+    from packages.domain.models import AuditEvent
+
+    app.dependency_overrides[get_current_user] = lambda: actor
+    response = client.post(
+        f"/api/v1/learning/rules/{rule.id}/activate?workspace_id={ws.id}&profile_id={profile.id}",
+    )
+
+    assert response.status_code == 200, response.text
+    db.refresh(rule)
+    assert rule.status == "ACTIVE"
+    audit = db.scalars(
+        select(AuditEvent).where(
+            AuditEvent.entity_id == rule.id,
+            AuditEvent.action == "RULE_ACTIVATED",
+        )
+    ).one()
+    assert audit.actor_id == actor.id
 
 
 def test_rule_review_requires_workspace_member(db, world):

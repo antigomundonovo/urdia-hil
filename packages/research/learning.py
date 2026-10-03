@@ -238,6 +238,16 @@ class LearningService:
                 f"rule cannot be activated from status {rule.status}: "
                 "human review required (Doc 15)"
             )
+        if ctx.actor_id is None:
+            raise LearningError("activation requires an authenticated actor")
+        activator = self.session.scalars(
+            select(WorkspaceMember.id).where(
+                WorkspaceMember.workspace_id == ctx.workspace_id,
+                WorkspaceMember.user_id == ctx.actor_id,
+            )
+        ).first()
+        if activator is None:
+            raise LearningError("activator is not a workspace member")
         rule.status = "ACTIVE"
         self.session.flush()
         append_audit(

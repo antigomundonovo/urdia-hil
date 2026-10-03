@@ -7,7 +7,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from apps.api.main import app
-from packages.domain.models import Profile, Source, Workspace
+from apps.api.auth import get_current_user
+from packages.domain.models import Profile, Source, User, Workspace, WorkspaceMember
 from packages.shared.db import get_session
 
 
@@ -34,6 +35,12 @@ def world(db):
 
 def test_create_and_list_sources(client, db, world):
     ws, profile = world
+    actor = User(email=f"source-api-create-{uuid.uuid4().hex[:8]}@test.com")
+    db.add(actor)
+    db.flush()
+    db.add(WorkspaceMember(workspace_id=ws.id, user_id=actor.id))
+    db.commit()
+    app.dependency_overrides[get_current_user] = lambda: actor
     created = client.post(
         f"/api/v1/profiles/{profile.id}/sources?workspace_id={ws.id}",
         json={
@@ -53,6 +60,12 @@ def test_create_and_list_sources(client, db, world):
 
 def test_unknown_source_type_rejected(client, db, world):
     ws, profile = world
+    actor = User(email=f"source-api-invalid-{uuid.uuid4().hex[:8]}@test.com")
+    db.add(actor)
+    db.flush()
+    db.add(WorkspaceMember(workspace_id=ws.id, user_id=actor.id))
+    db.commit()
+    app.dependency_overrides[get_current_user] = lambda: actor
     resp = client.post(
         f"/api/v1/profiles/{profile.id}/sources?workspace_id={ws.id}",
         json={"url": "https://x.test/", "source_type": "tiktok_scraper"},
@@ -69,6 +82,12 @@ def test_profile_of_other_workspace_404(client, db, world):
 
 def test_get_source_scoped(client, db, world):
     ws, profile = world
+    actor = User(email=f"source-api-retrieve-{uuid.uuid4().hex[:8]}@test.com")
+    db.add(actor)
+    db.flush()
+    db.add(WorkspaceMember(workspace_id=ws.id, user_id=actor.id))
+    db.commit()
+    app.dependency_overrides[get_current_user] = lambda: actor
     source = Source(
         workspace_id=ws.id, profile_id=profile.id, url="https://a.test/feed", source_type="rss"
     )
@@ -80,6 +99,12 @@ def test_get_source_scoped(client, db, world):
 
 def test_retrieve_queues_job(client, db, world):
     ws, profile = world
+    actor = User(email=f"source-api-job-{uuid.uuid4().hex[:8]}@test.com")
+    db.add(actor)
+    db.flush()
+    db.add(WorkspaceMember(workspace_id=ws.id, user_id=actor.id))
+    db.commit()
+    app.dependency_overrides[get_current_user] = lambda: actor
     source = Source(
         workspace_id=ws.id, profile_id=profile.id, url="https://a.test/feed", source_type="rss"
     )
@@ -98,6 +123,12 @@ def test_retrieve_queues_job(client, db, world):
 
 def test_retrieve_rejects_declared_but_unimplemented_adapter(client, db, world):
     ws, profile = world
+    actor = User(email=f"source-api-unsupported-{uuid.uuid4().hex[:8]}@test.com")
+    db.add(actor)
+    db.flush()
+    db.add(WorkspaceMember(workspace_id=ws.id, user_id=actor.id))
+    db.commit()
+    app.dependency_overrides[get_current_user] = lambda: actor
     source = Source(
         workspace_id=ws.id,
         profile_id=profile.id,
