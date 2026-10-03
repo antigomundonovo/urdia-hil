@@ -16,7 +16,7 @@ from PIL import Image
 
 from apps.api.main import app
 from packages.domain.editorial import OpportunityAsset
-from packages.domain.models import Profile, Source, Workspace
+from packages.domain.models import Profile, Source, User, Workspace, WorkspaceMember
 from packages.rendering import engine, qc
 from packages.research.opportunity import OpportunityService
 from packages.research.rights import RightsService
@@ -255,6 +255,14 @@ def _ready_package(db, client, world, tmp_path, monkeypatch, *, fmt: str, with_i
 
     qced = client.post(f"/api/v1/content/{package_id}/run-qc?workspace_id={ws.id}")
     assert qced.status_code == 200, qced.text
+    from apps.api.auth import get_current_user
+
+    actor = User(name="Rendering Reviewer", email=f"rendering-reviewer-{uuid.uuid4().hex[:8]}@example.test")
+    db.add(actor)
+    db.flush()
+    db.add(WorkspaceMember(workspace_id=ws.id, user_id=actor.id))
+    db.flush()
+    app.dependency_overrides[get_current_user] = lambda: actor
     approved = client.post(f"/api/v1/content/{package_id}/approve?workspace_id={ws.id}")
     assert approved.status_code == 200, approved.text
     return package_id, claim.id
