@@ -16,7 +16,7 @@ Fail-closed rules implemented here:
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from packages.domain.models import Profile
+from packages.domain.models import Profile, WorkspaceMember
 from packages.domain.publishing import Experiment, ExperimentVariant, LearningRecord, Rule
 from packages.governance.audit import append_audit
 from packages.shared.execution_context import ExecutionContext
@@ -206,6 +206,14 @@ class LearningService:
         rule = self._rule_for_context(ctx, rule)
         if rule.status != "CANDIDATE":
             raise LearningError(f"rule cannot be reviewed from status {rule.status}")
+        reviewer = self.session.scalars(
+            select(WorkspaceMember.id).where(
+                WorkspaceMember.workspace_id == ctx.workspace_id,
+                WorkspaceMember.user_id == reviewed_by,
+            )
+        ).first()
+        if reviewer is None:
+            raise LearningError("reviewer is not a workspace member")
         rule.status = "REVIEWED"
         rule.reviewed_by = reviewed_by
         self.session.flush()

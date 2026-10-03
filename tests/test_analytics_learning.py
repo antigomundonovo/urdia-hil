@@ -9,7 +9,7 @@ from sqlalchemy import select
 
 from apps.api.main import app
 from packages.domain.enums import QualifiedSignal
-from packages.domain.models import Profile, Workspace
+from packages.domain.models import Profile, User, Workspace, WorkspaceMember
 from packages.domain.publishing import MetricEvent, Publication
 from packages.research.analytics import AnalyticsService, classify_comment
 from packages.research.learning import LearningError, LearningService
@@ -190,9 +190,50 @@ def test_rule_cannot_activate_without_human_review(db, world):
         learning.activate_rule(ctx, rule)
     assert rule.status == "CANDIDATE"
 
-    learning.review_rule(ctx, rule, reviewed_by=uuid.uuid4(), notes="concordo")
+    reviewer = User(name="Learning Reviewer", email=f"reviewer-{uuid.uuid4().hex[:8]}@example.test")
+    db.add(reviewer)
+    db.flush()
+    db.add(WorkspaceMember(workspace_id=ws.id, user_id=reviewer.id))
+    db.flush()
+    learning.review_rule(ctx, rule, reviewed_by=reviewer.id, notes="concordo")
     learning.activate_rule(ctx, rule)
     assert rule.status == "ACTIVE"
+
+
+def test_api_rule_review_attributes_authenticated_actor(client, db, world):
+    ws, profile = world
+    service = LearningService(db)
+    rule = service.propose_rule(_ctx(ws, profile), statement="API review actor")
+    actor = User(name="API Reviewer", email=f"api-reviewer-{uuid.uuid4().hex[:8]}@example.test")
+    spoofed = User(name="Spoofed Reviewer", email=f"spoofed-{uuid.uuid4().hex[:8]}@example.test")
+    db.add_all([actor, spoofed])
+    db.flush()
+    db.add(WorkspaceMember(workspace_id=ws.id, user_id=actor.id))
+    db.flush()
+
+    from apps.api.auth import get_current_user
+
+    app.dependency_overrides[get_current_user] = lambda: actor
+    response = client.post(
+        f"/api/v1/learning/rules/{rule.id}/review?workspace_id={ws.id}&profile_id={profile.id}",
+        json={"reviewed_by": str(spoofed.id), "notes": "authenticated actor wins"},
+    )
+
+    assert response.status_code == 200, response.text
+    db.refresh(rule)
+    assert rule.reviewed_by == actor.id
+    assert rule.reviewed_by != spoofed.id
+
+
+def test_rule_review_requires_workspace_member(db, world):
+    ws, profile = world
+    ctx = _ctx(ws, profile)
+    learning = LearningService(db)
+    rule = learning.propose_rule(ctx, statement="reviewer must belong to workspace")
+
+    with pytest.raises(LearningError, match="reviewer is not a workspace member"):
+        learning.review_rule(ctx, rule, reviewed_by=uuid.uuid4())
+    assert rule.status == "CANDIDATE"
 
 
 def test_experiment_requires_control_and_variant(db, world):

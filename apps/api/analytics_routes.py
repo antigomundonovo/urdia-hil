@@ -15,8 +15,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from apps.api.auth import get_current_user
 from packages.domain.editorial import ContentPackage, Draft
-from packages.domain.models import Profile
+from packages.domain.models import Profile, User
 from packages.domain.publishing import Publication
 from packages.governance.audit import append_audit
 from packages.research.analytics import AnalyticsService
@@ -291,6 +292,7 @@ def review_rule(
     workspace_id: UUID = Query(...),
     profile_id: UUID = Query(...),
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     _profile_scoped(session, workspace_id, profile_id)
     from packages.domain.publishing import Rule
@@ -302,7 +304,7 @@ def review_rule(
         reviewed = LearningService(session).review_rule(
             _ctx_for(session, workspace_id, profile_id),
             rule,
-            reviewed_by=body.reviewed_by,
+            reviewed_by=current_user.id,
             notes=body.notes,
         )
     except LearningError as err:
