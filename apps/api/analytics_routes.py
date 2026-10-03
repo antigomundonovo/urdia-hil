@@ -104,11 +104,28 @@ def retry_publication(
     publication_id: UUID,
     workspace_id: UUID = Query(...),
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     pub = _publication_scoped(session, publication_id, workspace_id)
     if pub.status != "FAILED":
         raise HTTPException(status_code=409, detail="only FAILED publications can be retried")
+    previous_status = pub.status
     _apply_publication_status(pub, "PENDING")
+    from packages.shared.execution_context import ExecutionContext
+
+    append_audit(
+        session,
+        ctx=ExecutionContext(
+            workspace_id=workspace_id,
+            profile_id=pub.profile_id,
+            actor_id=current_user.id,
+        ),
+        action="PUBLICATION_RETRIED",
+        entity_type="publication",
+        entity_id=pub.id,
+        previous_state=previous_status,
+        new_state="PENDING",
+    )
     return {"id": str(pub.id), "status": pub.status}
 
 
@@ -117,13 +134,31 @@ def manual_fallback(
     publication_id: UUID,
     workspace_id: UUID = Query(...),
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     """Doc 14: platform down → manual export remains available; the content
     is never lost to a platform failure."""
     pub = _publication_scoped(session, publication_id, workspace_id)
     if pub.status in ("PUBLISHED", "MANUAL_FALLBACK"):
         raise HTTPException(status_code=409, detail=f"publication already {pub.status}")
+    previous_status = pub.status
     _apply_publication_status(pub, "MANUAL_FALLBACK", error="platform unavailable — manual export")
+    from packages.shared.execution_context import ExecutionContext
+
+    append_audit(
+        session,
+        ctx=ExecutionContext(
+            workspace_id=workspace_id,
+            profile_id=pub.profile_id,
+            actor_id=current_user.id,
+        ),
+        action="PUBLICATION_MANUAL_FALLBACK",
+        entity_type="publication",
+        entity_id=pub.id,
+        previous_state=previous_status,
+        new_state="MANUAL_FALLBACK",
+        reason="platform unavailable — manual export",
+    )
     return {"id": str(pub.id), "status": pub.status}
 
 

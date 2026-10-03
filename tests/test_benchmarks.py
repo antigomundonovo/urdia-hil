@@ -518,6 +518,7 @@ def test_benchmark_confirm_rejects_non_pending(db, client, world):
 def test_benchmark_retry_failed_publication(db, client, world):
     """FAILED publication can be retried back to PENDING."""
     ws, _ = world
+    actor = _authenticate_as_workspace_member(db, ws)
     pub = _publication(db, world, method="API", status="FAILED")
     resp = client.post(
         f"/api/v1/publications/{pub.id}/retry",
@@ -525,10 +526,20 @@ def test_benchmark_retry_failed_publication(db, client, world):
     )
     assert resp.status_code == 200
     assert resp.json()["status"] == "PENDING"
+    audit = db.scalars(
+        select(AuditEvent).where(
+            AuditEvent.entity_id == pub.id,
+            AuditEvent.action == "PUBLICATION_RETRIED",
+        )
+    ).one()
+    assert audit.actor_id == actor.id
+    assert audit.previous_state == "FAILED"
+    assert audit.new_state == "PENDING"
 
 
 def test_benchmark_retry_rejects_published(db, client, world):
     ws, _ = world
+    _authenticate_as_workspace_member(db, ws)
     pub = _publication(db, world, method="API", status="PUBLISHED")
     resp = client.post(
         f"/api/v1/publications/{pub.id}/retry",
@@ -540,6 +551,7 @@ def test_benchmark_retry_rejects_published(db, client, world):
 def test_benchmark_manual_fallback_keeps_content(db, client, world):
     """Doc 14: platform down → MANUAL_FALLBACK so content is never lost."""
     ws, _ = world
+    actor = _authenticate_as_workspace_member(db, ws)
     pub = _publication(db, world, method="API", status="FAILED")
     resp = client.post(
         f"/api/v1/publications/{pub.id}/manual-fallback",
@@ -547,6 +559,15 @@ def test_benchmark_manual_fallback_keeps_content(db, client, world):
     )
     assert resp.status_code == 200
     assert resp.json()["status"] == "MANUAL_FALLBACK"
+    audit = db.scalars(
+        select(AuditEvent).where(
+            AuditEvent.entity_id == pub.id,
+            AuditEvent.action == "PUBLICATION_MANUAL_FALLBACK",
+        )
+    ).one()
+    assert audit.actor_id == actor.id
+    assert audit.previous_state == "FAILED"
+    assert audit.new_state == "MANUAL_FALLBACK"
 
 
 # =============================================================================
