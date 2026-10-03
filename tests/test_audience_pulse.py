@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from apps.api.main import app
 from packages.domain.models import Profile, Workspace
 from packages.domain.publishing import Comment
-from packages.research.social import SocialIntelligenceService
+from packages.research.social import SocialError, SocialIntelligenceService
 from packages.shared.db import get_session
 
 
@@ -151,7 +151,7 @@ def test_audience_operations_require_profile_context(db, world):
     service = SocialIntelligenceService(db)
     ctx = ExecutionContext(workspace_id=world[0].id)
 
-    with pytest.raises(Exception, match="profile context"):
+    with pytest.raises(SocialError, match="profile context"):
         service.detect_demand(
             ctx,
             summary="Must be scoped",
