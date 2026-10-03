@@ -97,6 +97,9 @@ class AudienceDemand(Base):
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("workspaces.id"), nullable=False
     )
+    # Nullable only for legacy rows created before profile isolation was added.
+    # New rows must always carry profile_id and all profile-scoped reads require it.
+    profile_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("profiles.id"))
     summary: Mapped[str] = mapped_column(Text, nullable=False)
     evidence: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     unique_people_count: Mapped[int] = mapped_column(nullable=False, default=0)
@@ -111,6 +114,7 @@ class AudienceDemand(Base):
 
     __table_args__ = (
         Index("ix_audience_demands_workspace", "workspace_id"),
+        Index("ix_audience_demands_profile", "profile_id"),
     )
 
 
@@ -121,6 +125,8 @@ class AudiencePulse(Base):
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("workspaces.id"), nullable=False
     )
+    # Nullable only for legacy rows. New pulses are always profile-scoped.
+    profile_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("profiles.id"))
     period_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     period_end: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     sentiment_score: Mapped[float] = mapped_column(nullable=False, default=0.0)
@@ -131,4 +137,5 @@ class AudiencePulse(Base):
 
     __table_args__ = (
         Index("ix_audience_pulses_workspace", "workspace_id"),
+        Index("ix_audience_pulses_profile", "profile_id"),
     )
