@@ -365,8 +365,12 @@ class SocialIntelligenceService:
                     clusters[key] = {"count": 1, "sample": c.text[:100] if c.text else ""}
 
         score = sentiment_sum / total if total > 0 else 0.0
+        if ctx.profile_id is None:
+            raise SocialError("audience pulse requires a profile context")
+
         pulse = AudiencePulse(
             workspace_id=ctx.workspace_id,
+            profile_id=ctx.profile_id,
             period_start=period_start,
             period_end=period_end,
             sentiment_score=round(score, 4),
@@ -396,8 +400,12 @@ class SocialIntelligenceService:
     ):
         from packages.domain.social import AudienceDemand
 
+        if ctx.profile_id is None:
+            raise SocialError("audience demand requires a profile context")
+
         demand = AudienceDemand(
             workspace_id=ctx.workspace_id,
+            profile_id=ctx.profile_id,
             summary=summary,
             evidence=evidence or {},
             unique_people_count=unique_people_count,
@@ -442,13 +450,15 @@ class SocialIntelligenceService:
             select(AudienceDemand).where(
                 AudienceDemand.id == demand_id,
                 AudienceDemand.workspace_id == ctx.workspace_id,
+                AudienceDemand.profile_id == ctx.profile_id,
             )
         ).first()
 
     def list_audience_demand(self, ctx: ExecutionContext):
         from packages.domain.social import AudienceDemand
         stmt = select(AudienceDemand).where(
-            AudienceDemand.workspace_id == ctx.workspace_id
+            AudienceDemand.workspace_id == ctx.workspace_id,
+            AudienceDemand.profile_id == ctx.profile_id,
         )
         return list(self.session.scalars(stmt.order_by(AudienceDemand.created_at.desc())))
 
@@ -456,7 +466,8 @@ class SocialIntelligenceService:
         from packages.domain.social import AudiencePulse
         return self.session.scalars(
             select(AudiencePulse).where(
-                AudiencePulse.workspace_id == ctx.workspace_id
+                AudiencePulse.workspace_id == ctx.workspace_id,
+                AudiencePulse.profile_id == ctx.profile_id,
             ).order_by(AudiencePulse.created_at.desc()).limit(1)
         ).first()
 
@@ -473,12 +484,14 @@ class SocialIntelligenceService:
             select(AudiencePulse).where(
                 AudiencePulse.id == pulse_id,
                 AudiencePulse.workspace_id == ctx.workspace_id,
+                AudiencePulse.profile_id == ctx.profile_id,
             )
         ).first()
 
     def list_pulses(self, ctx: ExecutionContext):
         from packages.domain.social import AudiencePulse
         stmt = select(AudiencePulse).where(
-            AudiencePulse.workspace_id == ctx.workspace_id
+            AudiencePulse.workspace_id == ctx.workspace_id,
+            AudiencePulse.profile_id == ctx.profile_id,
         )
         return list(self.session.scalars(stmt.order_by(AudiencePulse.created_at.desc())))
