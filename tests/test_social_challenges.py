@@ -15,6 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from apps.api.main import app
+from apps.api.auth import get_current_user
 from packages.domain.models import Profile, User, Workspace, WorkspaceMember
 from packages.domain.publishing import Comment
 from packages.research.social import SocialError, SocialIntelligenceService
@@ -237,6 +238,16 @@ def _ctx(world):
     return ExecutionContext(workspace_id=ws.id, profile_id=profile.id)
 
 
+def _authenticate(db, workspace):
+    actor = User(email=f"api-social-{uuid.uuid4().hex[:8]}@test.com")
+    db.add(actor)
+    db.flush()
+    db.add(WorkspaceMember(workspace_id=workspace.id, user_id=actor.id))
+    db.commit()
+    app.dependency_overrides[get_current_user] = lambda: actor
+    return actor
+
+
 def test_api_challenge_flow(client, db, world):
     ws, profile = world
     comment = _comment(db, world)
@@ -279,6 +290,43 @@ def test_api_challenge_flow(client, db, world):
     from packages.domain.social import FactualityChallenge
     stored = db.get(FactualityChallenge, uuid.UUID(challenge_id))
     assert stored.reviewed_by == actor.id
+
+
+def test_api_dismiss_challenge(client, db, world):
+    ws, profile = world
+    comment = _comment(db, world)
+    created = client.post(
+        f"/api/v1/social/challenges?workspace_id={ws.id}",
+        json={
+            "profile_id": str(profile.id),
+            "comment_id": str(comment.id),
+            "statement": "Alegação para descarte",
+        },
+    )
+    assert created.status_code == 200, created.text
+    challenge_id = created.json()["id"]
+
+    actor = _authenticate(db, ws)
+    dismissed = client.post(
+        f"/api/v1/social/challenges/{challenge_id}/dismiss?workspace_id={ws.id}",
+        json={
+            "profile_id": str(profile.id),
+            "reason": "Fora do escopo",
+        },
+    )
+    assert dismissed.status_code == 200, dismissed.text
+    assert dismissed.json()["status"] == "DISMISSED"
+
+    from packages.domain.models import AuditEvent
+    from sqlalchemy import select
+
+    audit = db.scalars(
+        select(AuditEvent).where(
+            AuditEvent.entity_id == uuid.UUID(challenge_id),
+            AuditEvent.action == "SOCIAL_CHALLENGE_DISMISSED",
+        )
+    ).one()
+    assert audit.actor_id == actor.id
 
 
 def test_api_rejects_invalid_verdict(client, db, world):

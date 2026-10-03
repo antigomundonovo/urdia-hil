@@ -28,8 +28,16 @@ from apps.api.auth import get_current_user
 router = APIRouter(prefix="/api/v1")
 
 
-def _ctx(workspace_id: UUID, profile_id: UUID) -> ExecutionContext:
-    return ExecutionContext(workspace_id=workspace_id, profile_id=profile_id)
+def _ctx(
+    workspace_id: UUID,
+    profile_id: UUID,
+    actor_id: UUID | None = None,
+) -> ExecutionContext:
+    return ExecutionContext(
+        workspace_id=workspace_id,
+        profile_id=profile_id,
+        actor_id=actor_id,
+    )
 
 
 def _challenge_out(challenge: FactualityChallenge) -> dict:
@@ -150,11 +158,12 @@ def dismiss_challenge(
     payload: ChallengeDismiss,
     workspace_id: UUID = Query(...),
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     service = SocialIntelligenceService(session)
     try:
         challenge = service.dismiss_challenge(
-            _ctx(workspace_id, payload.profile_id),
+            _ctx(workspace_id, payload.profile_id, current_user.id),
             challenge_id,
             reason=payload.reason,
         )
@@ -228,13 +237,14 @@ def update_inbox_item_status(
     payload: InboxItemStatusUpdate,
     workspace_id: UUID = Query(...),
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     if payload.status not in INBOX_STATUSES:
         raise HTTPException(status_code=422, detail=f"invalid status: {payload.status}")
     service = SocialIntelligenceService(session)
     try:
         item = service.update_inbox_item_status(
-            _ctx(workspace_id, payload.profile_id),
+            _ctx(workspace_id, payload.profile_id, current_user.id),
             item_id,
             status=payload.status,
         )
@@ -249,11 +259,12 @@ def assign_inbox_item(
     payload: InboxItemAssign,
     workspace_id: UUID = Query(...),
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     service = SocialIntelligenceService(session)
     try:
         item = service.assign_inbox_item(
-            _ctx(workspace_id, payload.profile_id),
+            _ctx(workspace_id, payload.profile_id, current_user.id),
             item_id,
             user_id=payload.user_id,
         )

@@ -13,6 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from apps.api.main import app
+from apps.api.auth import get_current_user
 from packages.domain.models import Profile, User, Workspace, WorkspaceMember
 from packages.domain.publishing import Comment
 from packages.research.social import SocialError, SocialIntelligenceService
@@ -62,6 +63,16 @@ def _ctx(world):
 
     ws, profile = world
     return ExecutionContext(workspace_id=ws.id, profile_id=profile.id)
+
+
+def _authenticate(db, workspace):
+    actor = User(email=f"api-inbox-{uuid.uuid4().hex[:8]}@test.com")
+    db.add(actor)
+    db.flush()
+    db.add(WorkspaceMember(workspace_id=workspace.id, user_id=actor.id))
+    db.commit()
+    app.dependency_overrides[get_current_user] = lambda: actor
+    return actor
 
 
 def test_create_inbox_item_defaults(db, world):
@@ -208,6 +219,8 @@ def test_api_social_inbox_flow(client, db, world):
     item_id = created.json()["id"]
     assert created.json()["status"] == "UNREAD"
 
+    actor = _authenticate(db, ws)
+
     listed = client.get(
         f"/api/v1/social/inbox?workspace_id={ws.id}&profile_id={profile.id}"
     )
@@ -221,10 +234,24 @@ def test_api_social_inbox_flow(client, db, world):
     assert status_updated.status_code == 200
     assert status_updated.json()["status"] == "RESOLVED"
 
+    from packages.domain.social import SocialInboxItem
+    from packages.domain.models import AuditEvent
+    from sqlalchemy import select
+
+    audit = db.scalars(
+        select(AuditEvent).where(
+            AuditEvent.entity_id == item_id,
+            AuditEvent.action == "SOCIAL_INBOX_ITEM_UPDATED",
+        )
+    ).one()
+    assert audit.actor_id == actor.id
+
+
 
 def test_api_inbox_invalid_status_rejected(client, db, world):
     comment = _comment(db, world)
     ws, profile = world
+    _authenticate(db, ws)
 
     created = client.post(
         f"/api/v1/social/inbox?workspace_id={ws.id}",
