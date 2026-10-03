@@ -20,7 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from packages.domain.knowledge import Claim
-from packages.domain.models import WorkspaceMember
+from packages.domain.models import Profile, WorkspaceMember
 from packages.domain.publishing import Comment
 from packages.domain.social import FactualityChallenge, SocialInboxItem
 from packages.governance.audit import append_audit
@@ -51,6 +51,14 @@ class SocialIntelligenceService:
     def __init__(self, session: Session) -> None:
         self.session = session
 
+    def _require_profile(self, ctx: ExecutionContext) -> Profile:
+        if ctx.profile_id is None:
+            raise SocialError("profile context required")
+        profile = self.session.get(Profile, ctx.profile_id)
+        if profile is None or profile.workspace_id != ctx.workspace_id:
+            raise SocialError("profile not found in workspace")
+        return profile
+
     # --- challenges ---------------------------------------------------------
 
     def create_challenge(
@@ -64,8 +72,7 @@ class SocialIntelligenceService:
         The comment is the SOURCE of the question, never the evidence."""
         from packages.research.verification import KnowledgeService
 
-        if ctx.profile_id is None:
-            raise SocialError("factuality challenge requires a profile context")
+        self._require_profile(ctx)
         if not statement or not statement.strip():
             raise SocialError("challenge requires a non-empty statement")
 
@@ -241,8 +248,7 @@ class SocialIntelligenceService:
         comment_id: uuid.UUID | None = None,
     ) -> "SocialInboxItem":
 
-        if ctx.profile_id is None:
-            raise SocialError("inbox items require a profile context")
+        self._require_profile(ctx)
         if item_type not in ("COMMENT", "MENTION", "DM"):
             raise SocialError(f"invalid item type: {item_type}")
 
@@ -363,8 +369,7 @@ class SocialIntelligenceService:
         from packages.domain.publishing import Comment
         from packages.domain.social import AudiencePulse
 
-        if ctx.profile_id is None:
-            raise SocialError("audience pulse requires a profile context")
+        self._require_profile(ctx)
 
         stmt = select(Comment).where(
             Comment.workspace_id == ctx.workspace_id,
@@ -422,8 +427,7 @@ class SocialIntelligenceService:
     ):
         from packages.domain.social import AudienceDemand
 
-        if ctx.profile_id is None:
-            raise SocialError("audience demand requires a profile context")
+        self._require_profile(ctx)
 
         demand = AudienceDemand(
             workspace_id=ctx.workspace_id,
