@@ -20,6 +20,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from packages.domain.knowledge import Claim
+from packages.domain.models import WorkspaceMember
 from packages.domain.publishing import Comment
 from packages.domain.social import FactualityChallenge, SocialInboxItem
 from packages.governance.audit import append_audit
@@ -242,6 +243,17 @@ class SocialIntelligenceService:
 
         if ctx.profile_id is None:
             raise SocialError("inbox items require a profile context")
+        if item_type not in ("COMMENT", "MENTION", "DM"):
+            raise SocialError(f"invalid item type: {item_type}")
+
+        if comment_id is not None:
+            comment = self.session.get(Comment, comment_id)
+            if (
+                comment is None
+                or comment.workspace_id != ctx.workspace_id
+                or comment.profile_id != ctx.profile_id
+            ):
+                raise SocialError("comment not found in profile")
 
         item = SocialInboxItem(
             workspace_id=ctx.workspace_id,
@@ -297,6 +309,16 @@ class SocialIntelligenceService:
         item = self.get_inbox_item(ctx, item_id)
         if item is None:
             raise SocialError("inbox item not found")
+
+        if user_id is not None:
+            member = self.session.scalars(
+                select(WorkspaceMember.id).where(
+                    WorkspaceMember.workspace_id == ctx.workspace_id,
+                    WorkspaceMember.user_id == user_id,
+                )
+            ).first()
+            if member is None:
+                raise SocialError("assigned user is not a workspace member")
 
         item.assigned_to = user_id
         if item.status == "UNREAD":
