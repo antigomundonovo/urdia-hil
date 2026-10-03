@@ -4,7 +4,7 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from apps.api.analytics_routes import router as analytics_router
-from apps.api.auth import get_current_user, require_workspace_access
+from apps.api.auth import require_workspace_access
 from apps.api.auth_routes import router as auth_router
 from apps.api.content_routes import router as content_router
 from apps.api.jobs_routes import router as jobs_router
@@ -35,7 +35,9 @@ app.include_router(sources_router, dependencies=[Depends(require_workspace_acces
 app.include_router(content_router, dependencies=[Depends(require_workspace_access)])
 app.include_router(analytics_router, dependencies=[Depends(require_workspace_access)])
 app.include_router(social_router, dependencies=[Depends(require_workspace_access)])
-app.include_router(tiktok_router, dependencies=[Depends(get_current_user)])
+# TikTok connection flow: no session dependency — the OAuth landing uses
+# the short-lived single-use authorization code as credential (local machine).
+app.include_router(tiktok_router)
 
 
 @app.get("/api/v1/health")
