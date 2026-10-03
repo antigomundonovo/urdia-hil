@@ -85,6 +85,41 @@ def test_export_demand_for_studio(db, world):
     assert exported["unique_people_count"] == 5
 
 
+def test_audience_demand_is_profile_scoped(db, world):
+    ws, profile = world
+    service = SocialIntelligenceService(db)
+    primary = service.detect_demand(
+        _ctx(world),
+        summary="Primary demand",
+        unique_people_count=3,
+        platforms=["instagram"],
+    )
+    secondary = Profile(workspace_id=ws.id, key="secondary", name="Secondary")
+    db.add(secondary)
+    db.commit()
+    from packages.shared.execution_context import ExecutionContext
+
+    foreign_ctx = ExecutionContext(workspace_id=ws.id, profile_id=secondary.id)
+    assert service.list_audience_demand(foreign_ctx) == []
+    assert service.get_demand(foreign_ctx, primary.id) is None
+
+
+def test_audience_pulse_is_profile_scoped(db, world):
+    ws, profile = world
+    service = SocialIntelligenceService(db)
+    from datetime import UTC, datetime, timedelta
+    now = datetime.now(UTC)
+    pulse = service.compute_pulse(_ctx(world), now - timedelta(minutes=1), now + timedelta(minutes=1))
+    secondary = Profile(workspace_id=ws.id, key="secondary", name="Secondary")
+    db.add(secondary)
+    db.commit()
+    from packages.shared.execution_context import ExecutionContext
+
+    foreign_ctx = ExecutionContext(workspace_id=ws.id, profile_id=secondary.id)
+    assert service.get_pulse(foreign_ctx, pulse.id) is None
+    assert service.get_latest_audience_pulse(foreign_ctx) is None
+
+
 def test_api_demand_endpoint(client, db, world):
     service = SocialIntelligenceService(db)
     service.detect_demand(

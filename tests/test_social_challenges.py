@@ -15,7 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from apps.api.main import app
-from packages.domain.models import Profile, Workspace
+from packages.domain.models import Profile, User, Workspace, WorkspaceMember
 from packages.domain.publishing import Comment
 from packages.research.social import SocialError, SocialIntelligenceService
 from packages.shared.db import get_session
@@ -160,6 +160,11 @@ def test_disputed_mapping_on_contradiction(db, world):
 def test_human_review_is_the_final_gate(db, world):
     ws, profile = world
     comment = _comment(db, world)
+    actor = User(email=f"reviewer-{uuid.uuid4().hex[:8]}@test.com")
+    db.add(actor)
+    db.flush()
+    db.add(WorkspaceMember(workspace_id=ws.id, user_id=actor.id))
+    db.commit()
     service = SocialIntelligenceService(db)
     challenge = service.create_challenge(
         _ctx(world), comment_id=comment.id, statement="Alegação revisada"
@@ -170,7 +175,9 @@ def test_human_review_is_the_final_gate(db, world):
         challenge.id,
         verdict="DISPUTED",
         reason="Revisão humana: fonte primária contradiz",
+        reviewed_by=actor.id,
     )
+    assert reviewed.reviewed_by == actor.id
     assert reviewed.verdict == "DISPUTED"
     assert reviewed.status == "RESOLVED"
     assert reviewed.reviewed_at is not None
@@ -193,23 +200,34 @@ def test_dismiss_challenge(db, world):
         )
 
 
-def test_workspace_isolation_fails_closed(db, world):
+def test_profile_isolation_fails_closed(db, world):
     ws, profile = world
     comment = _comment(db, world)
     service = SocialIntelligenceService(db)
     challenge = service.create_challenge(
         _ctx(world), comment_id=comment.id, statement="Alegação isolada"
     )
-    # foreign profile context cannot see or resolve the challenge
-    other_ctx = _ctx(world)  # same workspace: ok
-    assert service.get_challenge(other_ctx, challenge.id) is not None
-    # a workspace-less/other profile context is blocked by scoping
+    foreign_profile = Profile(workspace_id=ws.id, key="secondary", name="Secondary")
+    db.add(foreign_profile)
+    db.commit()
     from packages.shared.execution_context import ExecutionContext
 
-    foreign = ExecutionContext(workspace_id=ws.id, profile_id=uuid.uuid4())
+    foreign = ExecutionContext(workspace_id=ws.id, profile_id=foreign_profile.id)
     assert service.get_challenge(foreign, challenge.id) is None
-    with pytest.raises(SocialError, match="not found in profile"):
+    with pytest.raises(SocialError, match="challenge not found in profile"):
         service.research_challenge(foreign, challenge.id)
+
+
+def test_human_review_requires_workspace_member(db, world):
+    comment = _comment(db, world)
+    service = SocialIntelligenceService(db)
+    challenge = service.create_challenge(
+        _ctx(world), comment_id=comment.id, statement="Alegação com gate"
+    )
+    with pytest.raises(SocialError, match="human reviewer required"):
+        service.review_challenge(
+            _ctx(world), challenge.id, verdict="CONFIRMED"
+        )
 
 
 def _ctx(world):
@@ -240,6 +258,14 @@ def test_api_challenge_flow(client, db, world):
     assert listed.status_code == 200
     assert any(c["id"] == challenge_id for c in listed.json())
 
+    actor = User(email=f"api-reviewer-{uuid.uuid4().hex[:8]}@test.com")
+    db.add(actor)
+    db.flush()
+    db.add(WorkspaceMember(workspace_id=ws.id, user_id=actor.id))
+    db.commit()
+    from apps.api.auth import get_current_user
+    app.dependency_overrides[get_current_user] = lambda: actor
+
     reviewed = client.post(
         f"/api/v1/social/challenges/{challenge_id}/review?workspace_id={ws.id}",
         json={
@@ -250,6 +276,9 @@ def test_api_challenge_flow(client, db, world):
     )
     assert reviewed.status_code == 200
     assert reviewed.json()["verdict"] == "UNSUPPORTED"
+    from packages.domain.social import FactualityChallenge
+    stored = db.get(FactualityChallenge, uuid.UUID(challenge_id))
+    assert stored.reviewed_by == actor.id
 
 
 def test_api_rejects_invalid_verdict(client, db, world):

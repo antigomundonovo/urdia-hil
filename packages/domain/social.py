@@ -99,8 +99,7 @@ class AudienceDemand(Base):
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("workspaces.id"), nullable=False
     )
-    # Nullable only for legacy rows created before profile isolation was added.
-    # New rows must always carry profile_id and all profile-scoped reads require it.
+    # Nullable only for legacy rows. New writes require a profile context.
     profile_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("profiles.id"))
     summary: Mapped[str] = mapped_column(Text, nullable=False)
     evidence: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
@@ -127,7 +126,7 @@ class AudiencePulse(Base):
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("workspaces.id"), nullable=False
     )
-    # Nullable only for legacy rows. New pulses are always profile-scoped.
+    # Nullable only for legacy rows. New writes require a profile context.
     profile_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("profiles.id"))
     period_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     period_end: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

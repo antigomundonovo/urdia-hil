@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from packages.domain.models import User
 from packages.domain.social import FactualityChallenge
 from packages.research.social import (
     CHALLENGE_STATUSES,
@@ -22,6 +23,7 @@ from packages.research.social import (
 )
 from packages.shared.db import get_session
 from packages.shared.execution_context import ExecutionContext
+from apps.api.auth import get_current_user
 
 router = APIRouter(prefix="/api/v1")
 
@@ -123,6 +125,7 @@ def review_challenge(
     payload: ChallengeReview,
     workspace_id: UUID = Query(...),
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     if payload.verdict not in CHALLENGE_VERDICTS:
         raise HTTPException(status_code=422, detail=f"invalid verdict: {payload.verdict}")
@@ -133,7 +136,7 @@ def review_challenge(
             challenge_id,
             verdict=payload.verdict,
             reason=payload.reason,
-            reviewed_by=None,  # actor attribution via audit context
+            reviewed_by=current_user.id,
         )
         session.commit()
     except SocialError as exc:

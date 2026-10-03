@@ -82,7 +82,7 @@ def test_create_inbox_item_requires_profile(db, world):
 
     ctx = ExecutionContext(workspace_id=ws.id, profile_id=None)
     service = SocialIntelligenceService(db)
-    with pytest.raises(SocialError, match="require a profile context"):
+    with pytest.raises(SocialError, match="profile context required"):
         service.create_inbox_item(ctx)
 
 
@@ -109,7 +109,7 @@ def test_assign_inbox_item_promotes_unread_to_open(db, world):
     db.add(user)
     db.flush()
     db.add(WorkspaceMember(workspace_id=ws.id, user_id=user.id))
-    db.flush()
+    db.commit()
     service = SocialIntelligenceService(db)
     item = service.create_inbox_item(_ctx(world), comment_id=comment.id)
     assert item.status == "UNREAD"
@@ -133,16 +133,63 @@ def test_list_inbox_items_filter_by_status(db, world):
     assert all(i.status == "RESOLVED" for i in resolved)
 
 
-def test_inbox_item_workspace_isolation(db, world):
+def test_inbox_item_profile_isolation(db, world):
     comment = _comment(db, world)
     service = SocialIntelligenceService(db)
     item = service.create_inbox_item(_ctx(world), comment_id=comment.id)
 
     ws, profile = world
+    foreign_profile = Profile(workspace_id=ws.id, key="secondary", name="Secondary")
+    db.add(foreign_profile)
+    db.commit()
     from packages.shared.execution_context import ExecutionContext
 
-    foreign = ExecutionContext(workspace_id=ws.id, profile_id=uuid.uuid4())
+    foreign = ExecutionContext(workspace_id=ws.id, profile_id=foreign_profile.id)
     assert service.get_inbox_item(foreign, item.id) is None
+
+
+def test_create_inbox_item_rejects_foreign_comment(db, world):
+    foreign_ws = Workspace(name=f"foreign-{uuid.uuid4().hex[:8]}")
+    db.add(foreign_ws)
+    db.flush()
+    foreign_profile = Profile(
+        workspace_id=foreign_ws.id, key="foreign", name="Foreign"
+    )
+    db.add(foreign_profile)
+    db.flush()
+    foreign_comment = Comment(
+        workspace_id=foreign_ws.id,
+        profile_id=foreign_profile.id,
+        author_ref="foreign",
+        text="Foreign comment",
+        intent="QUESTION",
+        qualified_signal=None,
+    )
+    db.add(foreign_comment)
+    db.commit()
+
+    with pytest.raises(SocialError, match="comment not found in profile"):
+        SocialIntelligenceService(db).create_inbox_item(
+            _ctx(world), comment_id=foreign_comment.id
+        )
+
+
+def test_assign_inbox_item_rejects_foreign_workspace_user(db, world):
+    comment = _comment(db, world)
+    service = SocialIntelligenceService(db)
+    item = service.create_inbox_item(_ctx(world), comment_id=comment.id)
+
+    foreign_ws = Workspace(name=f"assign-{uuid.uuid4().hex[:8]}")
+    db.add(foreign_ws)
+    db.flush()
+    user = User(email=f"foreign-{uuid.uuid4().hex[:8]}@test.com")
+    db.add(user)
+    db.flush()
+    db.add(WorkspaceMember(workspace_id=foreign_ws.id, user_id=user.id))
+    db.commit()
+
+    with pytest.raises(SocialError, match="workspace member"):
+        service.assign_inbox_item(_ctx(world), item.id, user.id)
 
 
 def test_api_social_inbox_flow(client, db, world):
@@ -190,57 +237,3 @@ def test_api_inbox_invalid_status_rejected(client, db, world):
         json={"profile_id": str(profile.id), "status": "INVALID"},
     )
     assert resp.status_code == 422
-
-
-def test_create_inbox_item_rejects_foreign_comment(db, world):
-    ws, profile = world
-    other = Profile(workspace_id=ws.id, key="other", name="Other")
-    db.add(other)
-    db.flush()
-    foreign_comment = Comment(
-        workspace_id=ws.id,
-        profile_id=other.id,
-        author_ref="foreign",
-        text="Foreign profile comment",
-    )
-    db.add(foreign_comment)
-    db.commit()
-
-    with pytest.raises(SocialError, match="comment not found in profile"):
-        SocialIntelligenceService(db).create_inbox_item(
-            _ctx(world), comment_id=foreign_comment.id
-        )
-
-
-def test_assign_inbox_item_rejects_foreign_workspace_user(db, world):
-    comment = _comment(db, world)
-    item = SocialIntelligenceService(db).create_inbox_item(_ctx(world), comment_id=comment.id)
-
-    other_ws = Workspace(name=f"other-{uuid.uuid4().hex[:8]}")
-    db.add(other_ws)
-    db.flush()
-    foreign_user = User(email=f"foreign-{uuid.uuid4().hex[:6]}@test.com")
-    db.add(foreign_user)
-    db.flush()
-    db.add(WorkspaceMember(workspace_id=other_ws.id, user_id=foreign_user.id))
-    db.commit()
-
-    with pytest.raises(SocialError, match="workspace member"):
-        SocialIntelligenceService(db).assign_inbox_item(
-            _ctx(world), item.id, user_id=foreign_user.id
-        )
-
-
-def test_create_inbox_item_rejects_profile_from_other_workspace(db, world):
-    comment = _comment(db, world)
-    foreign_ws = Workspace(name=f"foreign-{uuid.uuid4().hex[:8]}")
-    db.add(foreign_ws)
-    db.flush()
-    foreign_profile = Profile(workspace_id=foreign_ws.id, key="foreign", name="Foreign")
-    db.add(foreign_profile)
-    db.commit()
-
-    with pytest.raises(SocialError, match="profile not found in workspace"):
-        SocialIntelligenceService(db).create_inbox_item(
-            _ctx((world[0], foreign_profile)), comment_id=comment.id
-        )

@@ -59,6 +59,18 @@ class SocialIntelligenceService:
             raise SocialError("profile not found in workspace")
         return profile
 
+    def _require_workspace_member(self, workspace_id, user_id) -> None:
+        if user_id is None:
+            raise SocialError("human reviewer required")
+        member = self.session.scalar(
+            select(WorkspaceMember.id).where(
+                WorkspaceMember.workspace_id == workspace_id,
+                WorkspaceMember.user_id == user_id,
+            )
+        )
+        if member is None:
+            raise SocialError("user is not a workspace member")
+
     # --- challenges ---------------------------------------------------------
 
     def create_challenge(
@@ -130,6 +142,12 @@ class SocialIntelligenceService:
             raise SocialError("challenge has no linked claim")
 
         claim = self.session.get(Claim, challenge.claim_id)
+        if (
+            claim is None
+            or claim.workspace_id != ctx.workspace_id
+            or claim.profile_id != ctx.profile_id
+        ):
+            raise SocialError("claim not found in profile")
         outcome = KnowledgeService(self.session).verify_claim(ctx, claim)
         challenge.verdict = JUDGE_MAPPING.get(outcome.verdict.value, "UNKNOWN")
         challenge.verdict_reason = outcome.reason
@@ -171,11 +189,13 @@ class SocialIntelligenceService:
         the verdict. This is the authoritative resolution of a challenge."""
         if verdict not in CHALLENGE_VERDICTS:
             raise SocialError(f"invalid verdict: {verdict}")
+        self._require_profile(ctx)
         challenge = self.get_challenge(ctx, challenge_id)
         if challenge is None:
             raise SocialError("challenge not found in profile")
         if challenge.status == "DISMISSED":
             raise SocialError("dismissed challenges cannot be reviewed")
+        self._require_workspace_member(ctx.workspace_id, reviewed_by)
         challenge.verdict = verdict
         if reason:
             challenge.verdict_reason = reason
@@ -217,6 +237,7 @@ class SocialIntelligenceService:
         return challenge
 
     def get_challenge(self, ctx: ExecutionContext, challenge_id) -> FactualityChallenge | None:
+        self._require_profile(ctx)
         return self.session.scalars(
             select(FactualityChallenge).where(
                 FactualityChallenge.id == challenge_id,
@@ -228,6 +249,7 @@ class SocialIntelligenceService:
     def list_challenges(
         self, ctx: ExecutionContext, status: str | None = None
     ) -> list[FactualityChallenge]:
+        self._require_profile(ctx)
         stmt = select(FactualityChallenge).where(
             FactualityChallenge.workspace_id == ctx.workspace_id,
             FactualityChallenge.profile_id == ctx.profile_id,
@@ -250,8 +272,7 @@ class SocialIntelligenceService:
 
         self._require_profile(ctx)
         if item_type not in ("COMMENT", "MENTION", "DM"):
-            raise SocialError(f"invalid item type: {item_type}")
-
+            raise SocialError(f"invalid inbox item type: {item_type}")
         if comment_id is not None:
             comment = self.session.get(Comment, comment_id)
             if (
@@ -315,16 +336,8 @@ class SocialIntelligenceService:
         item = self.get_inbox_item(ctx, item_id)
         if item is None:
             raise SocialError("inbox item not found")
-
         if user_id is not None:
-            member = self.session.scalars(
-                select(WorkspaceMember.id).where(
-                    WorkspaceMember.workspace_id == ctx.workspace_id,
-                    WorkspaceMember.user_id == user_id,
-                )
-            ).first()
-            if member is None:
-                raise SocialError("assigned user is not a workspace member")
+            self._require_workspace_member(ctx.workspace_id, user_id)
 
         item.assigned_to = user_id
         if item.status == "UNREAD":
@@ -343,6 +356,7 @@ class SocialIntelligenceService:
         return item
 
     def get_inbox_item(self, ctx: ExecutionContext, item_id: uuid.UUID):
+        self._require_profile(ctx)
         return self.session.scalars(
             select(SocialInboxItem).where(
                 SocialInboxItem.id == item_id,
@@ -352,6 +366,7 @@ class SocialIntelligenceService:
         ).first()
 
     def list_inbox_items(self, ctx: ExecutionContext, status: str | None = None):
+        self._require_profile(ctx)
         stmt = select(SocialInboxItem).where(
             SocialInboxItem.workspace_id == ctx.workspace_id,
             SocialInboxItem.profile_id == ctx.profile_id,
@@ -366,10 +381,9 @@ class SocialIntelligenceService:
     # --- audience pulse & demand bridge ---------------------------------------
 
     def compute_pulse(self, ctx: ExecutionContext, period_start, period_end):
+        self._require_profile(ctx)
         from packages.domain.publishing import Comment
         from packages.domain.social import AudiencePulse
-
-        self._require_profile(ctx)
 
         stmt = select(Comment).where(
             Comment.workspace_id == ctx.workspace_id,
@@ -428,7 +442,6 @@ class SocialIntelligenceService:
         from packages.domain.social import AudienceDemand
 
         self._require_profile(ctx)
-
         demand = AudienceDemand(
             workspace_id=ctx.workspace_id,
             profile_id=ctx.profile_id,
@@ -472,6 +485,7 @@ class SocialIntelligenceService:
 
     def get_demand(self, ctx: ExecutionContext, demand_id: uuid.UUID):
         from packages.domain.social import AudienceDemand
+        self._require_profile(ctx)
         return self.session.scalars(
             select(AudienceDemand).where(
                 AudienceDemand.id == demand_id,
@@ -482,6 +496,7 @@ class SocialIntelligenceService:
 
     def list_audience_demand(self, ctx: ExecutionContext):
         from packages.domain.social import AudienceDemand
+        self._require_profile(ctx)
         stmt = select(AudienceDemand).where(
             AudienceDemand.workspace_id == ctx.workspace_id,
             AudienceDemand.profile_id == ctx.profile_id,
@@ -490,6 +505,7 @@ class SocialIntelligenceService:
 
     def get_latest_audience_pulse(self, ctx: ExecutionContext):
         from packages.domain.social import AudiencePulse
+        self._require_profile(ctx)
         return self.session.scalars(
             select(AudiencePulse).where(
                 AudiencePulse.workspace_id == ctx.workspace_id,
@@ -499,6 +515,7 @@ class SocialIntelligenceService:
 
     def list_demands(self, ctx: ExecutionContext):
         from packages.domain.social import AudienceDemand
+        self._require_profile(ctx)
         stmt = select(AudienceDemand).where(
             AudienceDemand.workspace_id == ctx.workspace_id,
             AudienceDemand.profile_id == ctx.profile_id,
@@ -507,6 +524,7 @@ class SocialIntelligenceService:
 
     def get_pulse(self, ctx: ExecutionContext, pulse_id: uuid.UUID):
         from packages.domain.social import AudiencePulse
+        self._require_profile(ctx)
         return self.session.scalars(
             select(AudiencePulse).where(
                 AudiencePulse.id == pulse_id,
@@ -517,6 +535,7 @@ class SocialIntelligenceService:
 
     def list_pulses(self, ctx: ExecutionContext):
         from packages.domain.social import AudiencePulse
+        self._require_profile(ctx)
         stmt = select(AudiencePulse).where(
             AudiencePulse.workspace_id == ctx.workspace_id,
             AudiencePulse.profile_id == ctx.profile_id,

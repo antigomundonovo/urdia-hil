@@ -1,9 +1,8 @@
-"""Add profile isolation to social audience tables.
+"""Add profile scope to Social/Audience Intelligence tables.
 
-Legacy audience rows may predate profile scoping, so profile_id remains nullable
-at the database level. The application treats NULL as legacy/unscoped and never
-returns such rows from profile-scoped reads. All newly created rows require a
-profile context and persist profile_id.
+Revision ID: b31c7f8e4a21
+Revises: 7a6095fbc454
+Create Date: 2026-10-03
 """
 
 from typing import Sequence, Union
@@ -18,29 +17,43 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "audience_demands",
-        sa.Column("profile_id", sa.Uuid(), sa.ForeignKey("profiles.id"), nullable=True),
-    )
+    for table in ("audience_demands", "audience_pulses"):
+        op.add_column(
+            table,
+            sa.Column(
+                "profile_id",
+                sa.Uuid(),
+                sa.ForeignKey("profiles.id"),
+                nullable=True,
+            ),
+        )
+        op.create_index(
+            f"ix_{table}_profile",
+            table,
+            ["profile_id"],
+        )
+
     op.create_index(
-        "ix_audience_demands_profile",
-        "audience_demands",
+        "ix_factuality_challenges_profile",
+        "factuality_challenges",
         ["profile_id"],
     )
-
-    op.add_column(
-        "audience_pulses",
-        sa.Column("profile_id", sa.Uuid(), sa.ForeignKey("profiles.id"), nullable=True),
-    )
     op.create_index(
-        "ix_audience_pulses_profile",
-        "audience_pulses",
+        "ix_social_inbox_items_profile",
+        "social_inbox_items",
         ["profile_id"],
     )
 
 
 def downgrade() -> None:
-    op.drop_index("ix_audience_pulses_profile", table_name="audience_pulses")
-    op.drop_column("audience_pulses", "profile_id")
-    op.drop_index("ix_audience_demands_profile", table_name="audience_demands")
-    op.drop_column("audience_demands", "profile_id")
+    op.drop_index(
+        "ix_social_inbox_items_profile",
+        table_name="social_inbox_items",
+    )
+    op.drop_index(
+        "ix_factuality_challenges_profile",
+        table_name="factuality_challenges",
+    )
+    for table in ("audience_pulses", "audience_demands"):
+        op.drop_index(f"ix_{table}_profile", table_name=table)
+        op.drop_column(table, "profile_id")
