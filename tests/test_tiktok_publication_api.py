@@ -5,10 +5,12 @@ from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from apps.api.main import app
 from packages.domain.editorial import CanonicalContent, ContentPackage, Draft, Opportunity
-from packages.domain.models import Profile, Workspace
+from packages.domain.models import AuditEvent, Profile, User, Workspace, WorkspaceMember
+from apps.api.auth import get_current_user
 from packages.domain.publishing import Publication
 from packages.providers import tiktok as tiktok_module
 from packages.shared.db import get_session
@@ -58,6 +60,15 @@ def _world(db):
     )
     db.add(pub)
     db.commit()
+    actor = User(
+        name="TikTok Publisher",
+        email=f"tiktok-publisher-{uuid4().hex[:8]}@example.test",
+    )
+    db.add(actor)
+    db.flush()
+    db.add(WorkspaceMember(workspace_id=ws.id, user_id=actor.id))
+    db.commit()
+    app.dependency_overrides[get_current_user] = lambda: actor
     db.expire_all()
     return ws, profile, pub
 
@@ -94,6 +105,14 @@ def test_tiktok_publish_submits_processing(client, db, monkeypatch):
     refreshed = db.get(Publication, pub.id)
     assert refreshed.status == "PROCESSING"
     assert refreshed.remote_id == "pub-123"
+    audit = db.scalars(
+        select(AuditEvent).where(
+            AuditEvent.entity_id == pub.id,
+            AuditEvent.action == "PUBLICATION_API_SUBMITTED",
+        )
+    ).one()
+    assert audit.actor_id is not None
+    assert audit.profile_id == profile.id
 
 
 def test_tiktok_status_marks_published_only_after_completion(client, db, monkeypatch):

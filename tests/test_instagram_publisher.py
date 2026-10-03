@@ -6,10 +6,12 @@ from uuid import uuid4
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from apps.api.main import app
 from packages.domain.editorial import ContentPackage, Draft
-from packages.domain.models import Profile, Workspace
+from packages.domain.models import AuditEvent, Profile, User, Workspace, WorkspaceMember
+from apps.api.auth import get_current_user
 from packages.domain.publishing import Publication
 from packages.providers import instagram as ig_module
 from packages.providers.instagram import (
@@ -281,6 +283,15 @@ def pending_publication(db):
     )
     db.add(pub)
     db.commit()
+    actor = User(
+        name="Instagram Publisher",
+        email=f"instagram-publisher-{uuid4().hex[:8]}@example.test",
+    )
+    db.add(actor)
+    db.flush()
+    db.add(WorkspaceMember(workspace_id=ws.id, user_id=actor.id))
+    db.commit()
+    app.dependency_overrides[get_current_user] = lambda: actor
     db.expire_all()
     return ws, profile, pub
 
@@ -318,6 +329,14 @@ def test_api_publish_route_publishes(client, db, pending_publication, monkeypatc
     assert refreshed.status == "PUBLISHED"
     assert refreshed.method == "API"
     assert refreshed.remote_id == "ig-123"
+    audit = db.scalars(
+        select(AuditEvent).where(
+            AuditEvent.entity_id == pub.id,
+            AuditEvent.action == "PUBLICATION_API_PUBLISHED",
+        )
+    ).one()
+    assert audit.actor_id is not None
+    assert audit.profile_id == profile.id
 
 
 def test_api_publish_route_rejects_non_pending(client, db, pending_publication):

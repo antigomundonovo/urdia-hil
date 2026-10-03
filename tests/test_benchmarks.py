@@ -33,7 +33,8 @@ from packages.domain.enums import (
     VisualClassification,
     rights_gate,
 )
-from packages.domain.models import Profile, Workspace
+from packages.domain.models import AuditEvent, Profile, User, Workspace, WorkspaceMember
+from apps.api.auth import get_current_user
 from packages.research.fetcher import FetchBlockedError, validate_url
 from packages.research.verification import KnowledgeService
 from packages.shared.db import get_session
@@ -65,6 +66,19 @@ def world(db):
 
 def _ctx(ws, profile) -> ExecutionContext:
     return ExecutionContext(workspace_id=ws.id, profile_id=profile.id)
+
+
+def _authenticate_as_workspace_member(db, workspace):
+    actor = User(
+        name="Publication Reviewer",
+        email=f"publication-reviewer-{uuid.uuid4().hex[:8]}@example.test",
+    )
+    db.add(actor)
+    db.flush()
+    db.add(WorkspaceMember(workspace_id=workspace.id, user_id=actor.id))
+    db.flush()
+    app.dependency_overrides[get_current_user] = lambda: actor
+    return actor
 
 
 def _publication(db, world, *, method: str = "EXPORT", status: str = "PENDING"):
@@ -453,6 +467,7 @@ def test_benchmark_confirm_export_publication(db, client, world):
     """AMENDMENT-007: PENDING EXPORT publication confirmed → PUBLISHED with
     published_at."""
     ws, _ = world
+    actor = _authenticate_as_workspace_member(db, ws)
     pub = _publication(db, world, method="EXPORT", status="PENDING")
     resp = client.post(
         f"/api/v1/publications/{pub.id}/confirm",
@@ -460,6 +475,14 @@ def test_benchmark_confirm_export_publication(db, client, world):
         json={"remote_id": "ig-123"},
     )
     assert resp.status_code == 200
+    audit = db.scalars(
+        select(AuditEvent).where(
+            AuditEvent.entity_id == pub.id,
+            AuditEvent.action == "PUBLICATION_MANUAL_CONFIRMED",
+        )
+    ).one()
+    assert audit.actor_id == actor.id
+    assert audit.profile_id == pub.profile_id
     body = resp.json()
     assert body["status"] == "PUBLISHED"
     assert body["published_at"] is not None
@@ -469,6 +492,7 @@ def test_benchmark_confirm_export_publication(db, client, world):
 def test_benchmark_confirm_rejects_api_method(db, client, world):
     """Confirmation is manual-only: API publications cannot be confirmed here."""
     ws, _ = world
+    _authenticate_as_workspace_member(db, ws)
     pub = _publication(db, world, method="API", status="PENDING")
     resp = client.post(
         f"/api/v1/publications/{pub.id}/confirm",
@@ -481,6 +505,7 @@ def test_benchmark_confirm_rejects_api_method(db, client, world):
 def test_benchmark_confirm_rejects_non_pending(db, client, world):
     """Only PENDING publications can be confirmed."""
     ws, _ = world
+    _authenticate_as_workspace_member(db, ws)
     pub = _publication(db, world, method="EXPORT", status="MANUAL_FALLBACK")
     resp = client.post(
         f"/api/v1/publications/{pub.id}/confirm",
@@ -532,6 +557,7 @@ def test_benchmark_manual_fallback_keeps_content(db, client, world):
 def test_benchmark_publication_invisible_across_workspaces(db, client, world):
     """A publication from workspace B is 404 when addressed via workspace A."""
     ws, _ = world
+    _authenticate_as_workspace_member(db, ws)
     other_ws = Workspace(name=f"bench-other-{uuid.uuid4().hex[:8]}")
     db.add(other_ws)
     db.flush()

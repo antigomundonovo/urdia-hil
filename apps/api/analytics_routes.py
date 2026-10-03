@@ -349,6 +349,7 @@ def confirm_publication(
     body: ConfirmBody,
     workspace_id: UUID = Query(...),
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     """AMENDMENT-007: Confirm manual EXPORT/MANUAL publication was actually posted.
 
@@ -373,10 +374,28 @@ def confirm_publication(
 
     from datetime import UTC, datetime
 
+    previous_status = pub.status
     pub.status = "PUBLISHED"
     pub.published_at = datetime.now(UTC)
     if body.remote_id is not None:
         pub.remote_id = body.remote_id
+
+    from packages.shared.execution_context import ExecutionContext
+
+    append_audit(
+        session,
+        ctx=ExecutionContext(
+            workspace_id=workspace_id,
+            profile_id=pub.profile_id,
+            actor_id=current_user.id,
+        ),
+        action="PUBLICATION_MANUAL_CONFIRMED",
+        entity_type="publication",
+        entity_id=pub.id,
+        previous_state=previous_status,
+        new_state="PUBLISHED",
+        metadata={"remote_id": body.remote_id, "method": pub.method},
+    )
 
     session.commit()
     return {"id": str(pub.id), "status": pub.status, "published_at": pub.published_at.isoformat()}
@@ -398,6 +417,7 @@ def publish_via_api(
     body: PublishBody,
     workspace_id: UUID = Query(...),
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     """Publish a PENDING publication through the platform's live API
     (AMENDMENT-014: first live adapter = Instagram).
@@ -473,7 +493,11 @@ def publish_via_api(
         pub.remote_id = result.publish_id
         append_audit(
             session,
-            ctx=ExecutionContext(workspace_id=workspace_id, profile_id=pub.profile_id),
+            ctx=ExecutionContext(
+                workspace_id=workspace_id,
+                profile_id=pub.profile_id,
+                actor_id=current_user.id,
+            ),
             action="PUBLICATION_API_SUBMITTED",
             entity_type="publication",
             entity_id=pub.id,
@@ -534,7 +558,11 @@ def publish_via_api(
     pub.remote_id = result.remote_id
     append_audit(
         session,
-        ctx=ExecutionContext(workspace_id=workspace_id, profile_id=pub.profile_id),
+        ctx=ExecutionContext(
+            workspace_id=workspace_id,
+            profile_id=pub.profile_id,
+            actor_id=current_user.id,
+        ),
         action="PUBLICATION_API_PUBLISHED",
         entity_type="publication",
         entity_id=pub.id,
