@@ -93,12 +93,13 @@ class JobEngine:
         self.default_max_attempts = default_max_attempts
 
     @staticmethod
-    def _context_for(job: Job) -> ExecutionContext:
+    def _context_for(job: Job, actor_id: UUID | None = None) -> ExecutionContext:
         return ExecutionContext(
             workspace_id=job.workspace_id,
             profile_id=job.profile_id,
             job_id=job.id,
             correlation_id=f"job:{job.id}",
+            actor_id=actor_id,
         )
 
     # --- lifecycle --------------------------------------------------------
@@ -226,7 +227,9 @@ class JobEngine:
             self.session.flush()
         return count
 
-    def retry_failed(self, job_id: UUID, workspace_id: UUID) -> Job | None:
+    def retry_failed(
+        self, job_id: UUID, workspace_id: UUID, actor_id: UUID | None = None
+    ) -> Job | None:
         job = self.session.get(Job, job_id)
         if job is None or job.workspace_id != workspace_id:
             return None  # fail closed on foreign workspace
@@ -237,7 +240,7 @@ class JobEngine:
         job.error = None
         append_audit(
             self.session,
-            ctx=self._context_for(job),
+            ctx=self._context_for(job, actor_id),
             action="JOB_RETRY_REQUESTED",
             entity_type="job",
             entity_id=job.id,
@@ -247,7 +250,9 @@ class JobEngine:
         self.session.flush()
         return job
 
-    def cancel(self, job_id: UUID, workspace_id: UUID) -> Job | None:
+    def cancel(
+        self, job_id: UUID, workspace_id: UUID, actor_id: UUID | None = None
+    ) -> Job | None:
         job = self.session.get(Job, job_id)
         if job is None or job.workspace_id != workspace_id:
             return None
@@ -258,7 +263,7 @@ class JobEngine:
         job.finished_at = datetime.now(UTC)
         append_audit(
             self.session,
-            ctx=self._context_for(job),
+            ctx=self._context_for(job, actor_id),
             action="JOB_CANCELLED",
             entity_type="job",
             entity_id=job.id,
