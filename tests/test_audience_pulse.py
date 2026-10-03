@@ -119,3 +119,49 @@ def test_api_pulse_endpoint(client, db, world):
     )
     assert resp.status_code == 200
     assert resp.json()["sentiment_score"] == pulse.sentiment_score
+
+
+def test_audience_data_isolated_between_profiles(db, world):
+    ws, profile_a = world
+    profile_b = Profile(workspace_id=ws.id, key="second", name="Second")
+    db.add(profile_b)
+    db.flush()
+    db.commit()
+
+    service = SocialIntelligenceService(db)
+    demand_a = service.detect_demand(
+        _ctx((ws, profile_a)),
+        summary="Only profile A",
+        unique_people_count=7,
+        platforms=["instagram"],
+    )
+    service.compute_pulse(
+        _ctx((ws, profile_a)),
+        period_start=demand_a.created_at,
+        period_end=demand_a.created_at,
+    )
+
+    assert [d.id for d in service.list_audience_demand(_ctx((ws, profile_a)))] == [demand_a.id]
+    assert service.list_audience_demand(_ctx((ws, profile_b))) == []
+    assert service.get_latest_audience_pulse(_ctx((ws, profile_b))) is None
+
+
+def test_audience_operations_require_profile_context(db, world):
+    from packages.shared.execution_context import ExecutionContext
+    service = SocialIntelligenceService(db)
+    ctx = ExecutionContext(workspace_id=world[0].id)
+
+    with pytest.raises(Exception, match="profile context"):
+        service.detect_demand(
+            ctx,
+            summary="Must be scoped",
+            unique_people_count=1,
+            platforms=["instagram"],
+        )
+
+    with pytest.raises(Exception, match="profile context"):
+        service.compute_pulse(
+            ctx,
+            period_start=world[0].created_at,
+            period_end=world[0].created_at,
+        )
