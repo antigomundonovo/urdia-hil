@@ -22,6 +22,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from apps.api.auth import get_current_user
 from packages.domain.editorial import (
     CanonicalContent,
     ContentPackage,
@@ -30,7 +31,7 @@ from packages.domain.editorial import (
     PlatformVariant,
 )
 from packages.domain.enums import ContentFormat
-from packages.domain.models import AuditEvent
+from packages.domain.models import AuditEvent, User
 from packages.research.content import ContentService, PublicationBlocked
 from packages.research.opportunity import OpportunityService
 from packages.shared.db import get_session
@@ -260,12 +261,21 @@ def approve(
     package_id: UUID,
     workspace_id: UUID = Query(...),
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     package = _package_scoped(session, package_id, workspace_id)
     opp = _opportunity_of(session, package)
+    from packages.shared.execution_context import ExecutionContext
+
     try:
         ContentService(session).approve(
-            OpportunityService(session).get_session_ctx(opp), opp
+            ExecutionContext(
+                workspace_id=opp.workspace_id,
+                profile_id=opp.profile_id,
+                actor_id=current_user.id,
+            ),
+            opp,
+            approved_by=current_user.id,
         )
     except PublicationBlocked as err:
         raise HTTPException(status_code=409, detail=str(err)) from err
@@ -278,11 +288,20 @@ def reject(
     body: RejectBody,
     workspace_id: UUID = Query(...),
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     package = _package_scoped(session, package_id, workspace_id)
     opp = _opportunity_of(session, package)
+    from packages.shared.execution_context import ExecutionContext
+
     ContentService(session).reject(
-        OpportunityService(session).get_session_ctx(opp), opp, reason=body.reason
+        ExecutionContext(
+            workspace_id=opp.workspace_id,
+            profile_id=opp.profile_id,
+            actor_id=current_user.id,
+        ),
+        opp,
+        reason=body.reason,
     )
     return {"opportunity_id": str(opp.id), "state": opp.state}
 

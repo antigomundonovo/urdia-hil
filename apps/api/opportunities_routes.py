@@ -15,7 +15,8 @@ from sqlalchemy.orm import Session
 
 from packages.domain.editorial import ContentPackage, Opportunity, OpportunityClaim
 from packages.domain.knowledge import Claim
-from packages.domain.models import Profile
+from apps.api.auth import get_current_user
+from packages.domain.models import Profile, User
 from packages.research.opportunity import OpportunityService
 from packages.shared.db import get_session
 from packages.shared.settings import get_settings
@@ -96,15 +97,22 @@ def approve_opportunity(
     opportunity_id: UUID,
     workspace_id: UUID = Query(...),
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     from packages.research.content import ContentService, PublicationBlocked
 
     opp = OpportunityService(session).get_scoped(opportunity_id, workspace_id)
     if opp is None:
         raise HTTPException(status_code=404, detail="opportunity not found")
-    ctx = OpportunityService(session).get_session_ctx(opp)
+    from packages.shared.execution_context import ExecutionContext
+
+    ctx = ExecutionContext(
+        workspace_id=opp.workspace_id,
+        profile_id=opp.profile_id,
+        actor_id=current_user.id,
+    )
     try:
-        ContentService(session).approve(ctx, opp)
+        ContentService(session).approve(ctx, opp, approved_by=current_user.id)
     except PublicationBlocked as err:
         raise HTTPException(status_code=409, detail=str(err)) from err
     return {"opportunity_id": str(opp.id), "state": opp.state}
@@ -116,13 +124,20 @@ def reject_opportunity(
     body: RejectBody,
     workspace_id: UUID = Query(...),
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     from packages.research.content import ContentService
 
     opp = OpportunityService(session).get_scoped(opportunity_id, workspace_id)
     if opp is None:
         raise HTTPException(status_code=404, detail="opportunity not found")
-    ctx = OpportunityService(session).get_session_ctx(opp)
+    from packages.shared.execution_context import ExecutionContext
+
+    ctx = ExecutionContext(
+        workspace_id=opp.workspace_id,
+        profile_id=opp.profile_id,
+        actor_id=current_user.id,
+    )
     ContentService(session).reject(ctx, opp, reason=body.reason)
     return {"opportunity_id": str(opp.id), "state": opp.state}
 

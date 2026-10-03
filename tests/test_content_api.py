@@ -13,7 +13,7 @@ from apps.api.main import app
 from packages.domain.assets import Asset
 from packages.domain.editorial import OpportunityAsset
 from packages.domain.enums import RightsClassification
-from packages.domain.models import Profile, Source, Workspace
+from packages.domain.models import Profile, Source, User, Workspace, WorkspaceMember
 from packages.research.opportunity import OpportunityService
 from packages.research.rights import RightsService
 from packages.research.verification import KnowledgeService
@@ -40,6 +40,18 @@ def world(db):
     db.add(profile)
     db.flush()
     return ws, profile
+
+
+def _authenticate_as_workspace_member(db, workspace):
+    from apps.api.auth import get_current_user
+
+    actor = User(name="Content Reviewer", email=f"content-reviewer-{uuid.uuid4().hex[:8]}@example.test")
+    db.add(actor)
+    db.flush()
+    db.add(WorkspaceMember(workspace_id=workspace.id, user_id=actor.id))
+    db.flush()
+    app.dependency_overrides[get_current_user] = lambda: actor
+    return actor
 
 
 def _seed_full(db, world):
@@ -161,6 +173,7 @@ def test_full_content_flow_through_api(client, db, world, monkeypatch, tmp_path)
     )
     assert foreign.status_code == 404
 
+    _authenticate_as_workspace_member(db, world[0])
     approved = client.post(f"/api/v1/content/{package_id}/approve?workspace_id={world[0].id}")
     assert approved.status_code == 200
     assert approved.json()["state"] == "READY"
@@ -211,6 +224,7 @@ def test_download_export_refuses_revoked_approval(client, db, world, monkeypatch
         json={"title": "1911", "caption": "O bondinho", "claim_ids_used": [str(claim_id)]},
     )
     client.post(f"/api/v1/content/{package_id}/run-qc?workspace_id={world[0].id}")
+    _authenticate_as_workspace_member(db, world[0])
     client.post(f"/api/v1/content/{package_id}/approve?workspace_id={world[0].id}")
     exported = client.post(
         f"/api/v1/content/{package_id}/export?workspace_id={world[0].id}",
