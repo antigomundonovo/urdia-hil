@@ -229,3 +229,18 @@ def test_assign_inbox_item_rejects_foreign_workspace_user(db, world):
         SocialIntelligenceService(db).assign_inbox_item(
             _ctx(world), item.id, user_id=foreign_user.id
         )
+
+
+def test_create_inbox_item_rejects_profile_from_other_workspace(db, world):
+    comment = _comment(db, world)
+    foreign_ws = Workspace(name=f"foreign-{uuid.uuid4().hex[:8]}")
+    db.add(foreign_ws)
+    db.flush()
+    foreign_profile = Profile(workspace_id=foreign_ws.id, key="foreign", name="Foreign")
+    db.add(foreign_profile)
+    db.commit()
+
+    with pytest.raises(SocialError, match="profile not found in workspace"):
+        SocialIntelligenceService(db).create_inbox_item(
+            _ctx((world[0], foreign_profile)), comment_id=comment.id
+        )
