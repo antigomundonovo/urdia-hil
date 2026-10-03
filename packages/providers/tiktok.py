@@ -204,36 +204,40 @@ class TikTokPublisher:
             raise TikTokPublishError(f"tiktok: network error {exc.__class__.__name__}") from exc
 
     def _post_json(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        """TikTok v2 requires the token in the Authorization header — an
+        access_token query param is rejected as invalid_params."""
         try:
-            response = httpx.post(
+            r = httpx.post(
                 f"{API}/{path}",
                 json=payload,
-                headers={
-                    "Authorization": f"Bearer {self._token}",
-                    "Content-Type": "application/json; charset=UTF-8",
-                },
+                headers={"Authorization": f"Bearer {self._token}"},
                 timeout=self._timeout,
             )
-            self._last_http_status = response.status_code
-            body = response.json()
-        except httpx.TimeoutException as exc:
-            raise TikTokPublishError("tiktok: timeout") from exc
-        except (httpx.HTTPError, ValueError) as exc:
-            raise TikTokPublishError("tiktok: network or invalid response") from exc
+            self._last_http_status = r.status_code
+            body = r.json()
+        except httpx.HTTPError as exc:
+            raise TikTokPublishError(
+                f"tiktok: network error {exc.__class__.__name__}"
+            ) from exc
         error = body.get("error") or {}
-        if self._last_http_status != 200 or error.get("code") not in {None, "ok"}:
-            message = str(error.get("message") or f"HTTP {self._last_http_status}")
+        if r.status_code != 200 or error.get("code") not in ("ok", None):
+            message = error.get("message") or f"HTTP {r.status_code}"
             raise TikTokPublishError(f"tiktok: {message[:200]}")
         return body
 
-    @staticmethod
     def _require_publish_id(body: dict[str, Any]) -> str:
-        publish_id = str((body.get("data") or {}).get("publish_id") or "").strip()
+        publish_id = (body.get("data") or {}).get("publish_id")
         if not publish_id:
-            raise TikTokPublishError("TikTok did not return publish_id")
+            raise TikTokPublishError("TikTok did not return a publish_id")
         return publish_id
 
-    @staticmethod
+    def _mime_type(path: Path) -> str:
+        suffix = path.suffix.lower()
+        return {
+            ".mp4": "video/mp4",
+            ".mov": "video/quicktime",
+            ".webm": "video/webm",
+        }.get(suffix, "video/mp4")
     def _mime_type(path: Path) -> str:
         suffix = path.suffix.lower()
         if suffix == ".mov":
