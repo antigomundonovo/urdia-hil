@@ -13,9 +13,9 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from apps.api.auth import get_current_user
 from packages.domain.editorial import ContentPackage, Opportunity, OpportunityClaim
 from packages.domain.knowledge import Claim
-from apps.api.auth import get_current_user
 from packages.domain.models import Profile, User
 from packages.research.opportunity import OpportunityService
 from packages.shared.db import get_session

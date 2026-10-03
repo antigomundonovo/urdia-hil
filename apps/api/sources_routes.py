@@ -13,8 +13,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from packages.domain.enums import JobType
 from apps.api.auth import get_current_user
+from packages.domain.enums import JobType
 from packages.domain.models import Profile, User, WorkspaceMember
 from packages.domain.repositories import JobRepository, SourceRepository
 from packages.research.adapters import SUPPORTED_SOURCE_TYPES

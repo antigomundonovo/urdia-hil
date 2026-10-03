@@ -4,13 +4,13 @@ import uuid
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
-from apps.api.main import app
 from apps.api.auth import get_current_user
+from apps.api.main import app
 from apps.worker.engine import JOB_FAILED, FatalJobError, JobEngine
 from packages.domain.enums import JobType
 from packages.domain.models import AuditEvent, Job, Profile, User, Workspace, WorkspaceMember
-from sqlalchemy import select
 from packages.shared.db import get_session
 
 

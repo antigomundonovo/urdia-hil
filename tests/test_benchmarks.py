@@ -17,6 +17,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from apps.api.auth import get_current_user
 from apps.api.main import app
 from packages.domain.enums import (
     BLOCKING_RIGHTS,
@@ -34,7 +35,6 @@ from packages.domain.enums import (
     rights_gate,
 )
 from packages.domain.models import AuditEvent, Profile, User, Workspace, WorkspaceMember
-from apps.api.auth import get_current_user
 from packages.research.fetcher import FetchBlockedError, validate_url
 from packages.research.verification import KnowledgeService
 from packages.shared.db import get_session

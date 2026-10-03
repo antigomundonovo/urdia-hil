@@ -14,8 +14,8 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 
-from apps.api.main import app
 from apps.api.auth import get_current_user
+from apps.api.main import app
 from packages.domain.models import Profile, User, Workspace, WorkspaceMember
 from packages.domain.publishing import Comment
 from packages.research.social import SocialError, SocialIntelligenceService
@@ -317,8 +317,9 @@ def test_api_dismiss_challenge(client, db, world):
     assert dismissed.status_code == 200, dismissed.text
     assert dismissed.json()["status"] == "DISMISSED"
 
-    from packages.domain.models import AuditEvent
     from sqlalchemy import select
+
+    from packages.domain.models import AuditEvent
 
     audit = db.scalars(
         select(AuditEvent).where(

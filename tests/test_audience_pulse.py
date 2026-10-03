@@ -109,7 +109,9 @@ def test_audience_pulse_is_profile_scoped(db, world):
     service = SocialIntelligenceService(db)
     from datetime import UTC, datetime, timedelta
     now = datetime.now(UTC)
-    pulse = service.compute_pulse(_ctx(world), now - timedelta(minutes=1), now + timedelta(minutes=1))
+    pulse = service.compute_pulse(
+        _ctx(world), now - timedelta(minutes=1), now + timedelta(minutes=1)
+    )
     secondary = Profile(workspace_id=ws.id, key="secondary", name="Secondary")
     db.add(secondary)
     db.commit()

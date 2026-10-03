@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from apps.api.auth import get_current_user
 from packages.domain.models import User
 from packages.domain.social import FactualityChallenge
 from packages.research.social import (
@@ -23,7 +24,6 @@ from packages.research.social import (
 )
 from packages.shared.db import get_session
 from packages.shared.execution_context import ExecutionContext
-from apps.api.auth import get_current_user
 
 router = APIRouter(prefix="/api/v1")
 

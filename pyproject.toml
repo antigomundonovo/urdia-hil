@@ -42,10 +42,9 @@ include = ["apps*", "packages*", "scripts*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-# tmp files: fixed basetemp OUTSIDE the repo and OUTSIDE pytest-of
-# (whose "pytest-current" symlink was held by an external process).
-# Adjust if the operator username changes.
-addopts = "--basetemp=C:/Users/LucasSilvaRelieve/AppData/Local/Temp/urdia-pytest"
+# tmp files: basetemp is generated UNIQUE PER RUN by tests/conftest.py
+# (fixed paths get locked by external tooling on this machine).
+
 markers = [
     "integration: requires a running PostgreSQL with pgvector (docker compose up -d postgres)",
 ]

@@ -1,7 +1,23 @@
 """Shared fixtures. DB tests skip cleanly when PostgreSQL is unreachable."""
 
+import os
+import tempfile
+import uuid
+
 import pytest
 from sqlalchemy import text
+
+
+def pytest_configure(config):
+    """Unique basetemp per run: an external tool on this machine locks
+    predictable temp dirs (WinError 5 on cleanup). A fresh path never
+    conflicts."""
+    if not config.option.basetemp:
+        base = os.path.join(
+            tempfile.gettempdir(), "urdia-pytest-runs", f"run-{uuid.uuid4().hex[:8]}"
+        )
+        os.makedirs(base, exist_ok=True)  # pytest mkdir() does not create parents
+        config.option.basetemp = base
 
 
 @pytest.fixture(autouse=True)

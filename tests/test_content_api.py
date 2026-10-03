@@ -45,7 +45,10 @@ def world(db):
 def _authenticate_as_workspace_member(db, workspace):
     from apps.api.auth import get_current_user
 
-    actor = User(name="Content Reviewer", email=f"content-reviewer-{uuid.uuid4().hex[:8]}@example.test")
+    actor = User(
+        name="Content Reviewer",
+        email=f"content-reviewer-{uuid.uuid4().hex[:8]}@example.test",
+    )
     db.add(actor)
     db.flush()
     db.add(WorkspaceMember(workspace_id=workspace.id, user_id=actor.id))

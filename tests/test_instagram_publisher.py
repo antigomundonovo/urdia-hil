@@ -8,10 +8,10 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 
+from apps.api.auth import get_current_user
 from apps.api.main import app
 from packages.domain.editorial import ContentPackage, Draft
 from packages.domain.models import AuditEvent, Profile, User, Workspace, WorkspaceMember
-from apps.api.auth import get_current_user
 from packages.domain.publishing import Publication
 from packages.providers import instagram as ig_module
 from packages.providers.instagram import (

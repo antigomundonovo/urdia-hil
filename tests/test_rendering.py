@@ -257,7 +257,10 @@ def _ready_package(db, client, world, tmp_path, monkeypatch, *, fmt: str, with_i
     assert qced.status_code == 200, qced.text
     from apps.api.auth import get_current_user
 
-    actor = User(name="Rendering Reviewer", email=f"rendering-reviewer-{uuid.uuid4().hex[:8]}@example.test")
+    actor = User(
+        name="Rendering Reviewer",
+        email=f"rendering-reviewer-{uuid.uuid4().hex[:8]}@example.test",
+    )
     db.add(actor)
     db.flush()
     db.add(WorkspaceMember(workspace_id=ws.id, user_id=actor.id))

@@ -12,8 +12,8 @@ import uuid
 import pytest
 from fastapi.testclient import TestClient
 
-from apps.api.main import app
 from apps.api.auth import get_current_user
+from apps.api.main import app
 from packages.domain.models import Profile, User, Workspace, WorkspaceMember
 from packages.domain.publishing import Comment
 from packages.research.social import SocialError, SocialIntelligenceService
@@ -234,9 +234,9 @@ def test_api_social_inbox_flow(client, db, world):
     assert status_updated.status_code == 200
     assert status_updated.json()["status"] == "RESOLVED"
 
-    from packages.domain.social import SocialInboxItem
-    from packages.domain.models import AuditEvent
     from sqlalchemy import select
+
+    from packages.domain.models import AuditEvent
 
     audit = db.scalars(
         select(AuditEvent).where(
