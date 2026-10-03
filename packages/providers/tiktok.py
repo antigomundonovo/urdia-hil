@@ -225,12 +225,14 @@ class TikTokPublisher:
             raise TikTokPublishError(f"tiktok: {message[:200]}")
         return body
 
+    @staticmethod
     def _require_publish_id(body: dict[str, Any]) -> str:
         publish_id = (body.get("data") or {}).get("publish_id")
         if not publish_id:
             raise TikTokPublishError("TikTok did not return a publish_id")
         return publish_id
 
+    @staticmethod
     def _mime_type(path: Path) -> str:
         suffix = path.suffix.lower()
         return {
@@ -238,6 +240,7 @@ class TikTokPublisher:
             ".mov": "video/quicktime",
             ".webm": "video/webm",
         }.get(suffix, "video/mp4")
+    @staticmethod
     def _mime_type(path: Path) -> str:
         suffix = path.suffix.lower()
         if suffix == ".mov":
