@@ -341,6 +341,9 @@ class SocialIntelligenceService:
         from packages.domain.publishing import Comment
         from packages.domain.social import AudiencePulse
 
+        if ctx.profile_id is None:
+            raise SocialError("audience pulse requires a profile context")
+
         stmt = select(Comment).where(
             Comment.workspace_id == ctx.workspace_id,
             Comment.profile_id == ctx.profile_id,
@@ -365,9 +368,6 @@ class SocialIntelligenceService:
                     clusters[key] = {"count": 1, "sample": c.text[:100] if c.text else ""}
 
         score = sentiment_sum / total if total > 0 else 0.0
-        if ctx.profile_id is None:
-            raise SocialError("audience pulse requires a profile context")
-
         pulse = AudiencePulse(
             workspace_id=ctx.workspace_id,
             profile_id=ctx.profile_id,
@@ -474,7 +474,8 @@ class SocialIntelligenceService:
     def list_demands(self, ctx: ExecutionContext):
         from packages.domain.social import AudienceDemand
         stmt = select(AudienceDemand).where(
-            AudienceDemand.workspace_id == ctx.workspace_id
+            AudienceDemand.workspace_id == ctx.workspace_id,
+            AudienceDemand.profile_id == ctx.profile_id,
         )
         return list(self.session.scalars(stmt.order_by(AudienceDemand.created_at.desc())))
 
