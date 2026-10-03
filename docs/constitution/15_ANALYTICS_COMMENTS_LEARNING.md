@@ -69,6 +69,9 @@ DATA → EXPERIENCE → HYPOTHESIS → EXPERIMENT → RESULT → RULE_CANDIDATE 
 
 ## Profile learning
 Private learning permanece no profile. Shared learning exige generalização, remoção de identificadores, privacy review e aprovação.
+Metrics, comments, experiments e rules devem validar o workspace/profile do
+registro contra o contexto da operação; IDs de outro profile não autorizam
+leitura, escrita, revisão ou ativação.
 
 ## Corrections
 ```text

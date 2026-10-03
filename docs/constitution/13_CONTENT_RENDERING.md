@@ -85,5 +85,13 @@ post-YYYY-MM-DD-ID/
 └── manifest.json
 ```
 
+Quando houver arquivo de imagem local, incluir seus bytes apenas após validar
+que o caminho está dentro do storage de assets e que o SHA-256 confere. O
+pacote acompanha metadados de imagem, atribuição/licença, claims usadas,
+evidências e fontes sem buscar URLs externas durante a exportação. O download
+é um ZIP temporário e só é permitido enquanto a aprovação e o QC atual ainda
+forem válidos. A integridade e o escopo de workspace/perfil dos assets também
+são revalidados na exportação para impedir alterações ocorridas após o QC.
+
 ## No long-video pipeline
 Não incluir voice-over, scene generation, complex timelines ou vídeo narrado na V1.

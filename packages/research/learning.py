@@ -16,6 +16,7 @@ Fail-closed rules implemented here:
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from packages.domain.models import Profile, WorkspaceMember
 from packages.domain.publishing import Experiment, ExperimentVariant, LearningRecord, Rule
 from packages.governance.audit import append_audit
 from packages.shared.execution_context import ExecutionContext
@@ -29,6 +30,46 @@ class LearningService:
     def __init__(self, session: Session) -> None:
         self.session = session
 
+    def _require_profile(self, ctx: ExecutionContext) -> None:
+        if ctx.profile_id is None:
+            raise LearningError("learning requires a profile scope")
+        profile_id = self.session.scalars(
+            select(Profile.id).where(
+                Profile.id == ctx.profile_id,
+                Profile.workspace_id == ctx.workspace_id,
+            )
+        ).first()
+        if profile_id is None:
+            raise LearningError("profile not found in workspace")
+
+    def _experiment_for_context(
+        self, ctx: ExecutionContext, experiment: Experiment
+    ) -> Experiment:
+        self._require_profile(ctx)
+        scoped = self.session.scalars(
+            select(Experiment).where(
+                Experiment.id == experiment.id,
+                Experiment.workspace_id == ctx.workspace_id,
+                Experiment.profile_id == ctx.profile_id,
+            )
+        ).first()
+        if scoped is None:
+            raise LearningError("experiment not found in profile")
+        return scoped
+
+    def _rule_for_context(self, ctx: ExecutionContext, rule: Rule) -> Rule:
+        self._require_profile(ctx)
+        scoped = self.session.scalars(
+            select(Rule).where(
+                Rule.id == rule.id,
+                Rule.workspace_id == ctx.workspace_id,
+                Rule.profile_id == ctx.profile_id,
+            )
+        ).first()
+        if scoped is None:
+            raise LearningError("rule not found in profile")
+        return scoped
+
     # --- experiments ---------------------------------------------------------
 
     def create_experiment(
@@ -40,10 +81,11 @@ class LearningService:
     ) -> Experiment:
         """An experiment declares a hypothesis and at least a control/variant
         pair (Doc 15 experiment model)."""
+        self._require_profile(ctx)
         if not hypothesis or not hypothesis.strip():
             raise LearningError("experiment requires a hypothesis")
-        if len(variants) < 2:
-            raise LearningError("experiment requires at least 2 variants (control + variant)")
+        if len(variants) < 2 or "control" not in variants:
+            raise LearningError("experiment requires a control and at least one variant")
         experiment = Experiment(
             workspace_id=ctx.workspace_id,
             profile_id=ctx.profile_id,
@@ -74,6 +116,7 @@ class LearningService:
         result: dict,
         decision: str | None = None,
     ) -> Experiment:
+        experiment = self._experiment_for_context(ctx, experiment)
         experiment.result = result
         experiment.status = "COMPLETED"
         experiment.decision = decision
@@ -98,8 +141,7 @@ class LearningService:
         observation: str | None,
         hypothesis: str | None = None,
     ) -> LearningRecord:
-        if ctx.profile_id is None:
-            raise LearningError("learning records require a profile scope")
+        self._require_profile(ctx)
         record = LearningRecord(
             workspace_id=ctx.workspace_id,
             profile_id=ctx.profile_id,
@@ -122,8 +164,21 @@ class LearningService:
         origin_experiment_id=None,
     ) -> Rule:
         """RULE_CANDIDATE — born CANDIDATE, never active (Doc 15)."""
+        self._require_profile(ctx)
         if not statement or not statement.strip():
             raise LearningError("rule requires a statement")
+        if origin_experiment_id is not None:
+            experiment = self.session.scalars(
+                select(Experiment).where(
+                    Experiment.id == origin_experiment_id,
+                    Experiment.workspace_id == ctx.workspace_id,
+                    Experiment.profile_id == ctx.profile_id,
+                )
+            ).first()
+            if experiment is None:
+                raise LearningError("origin experiment not found in profile")
+            if experiment.status != "COMPLETED" or experiment.result is None:
+                raise LearningError("origin experiment must have a recorded result")
         rule = Rule(
             workspace_id=ctx.workspace_id,
             profile_id=ctx.profile_id,
@@ -147,6 +202,18 @@ class LearningService:
         self, ctx: ExecutionContext, rule: Rule, *, reviewed_by, notes: str | None = None
     ) -> Rule:
         """HUMAN REVIEW step (Doc 15). Records who reviewed."""
+        self._require_profile(ctx)
+        rule = self._rule_for_context(ctx, rule)
+        if rule.status != "CANDIDATE":
+            raise LearningError(f"rule cannot be reviewed from status {rule.status}")
+        reviewer = self.session.scalars(
+            select(WorkspaceMember.id).where(
+                WorkspaceMember.workspace_id == ctx.workspace_id,
+                WorkspaceMember.user_id == reviewed_by,
+            )
+        ).first()
+        if reviewer is None:
+            raise LearningError("reviewer is not a workspace member")
         rule.status = "REVIEWED"
         rule.reviewed_by = reviewed_by
         self.session.flush()
@@ -164,11 +231,23 @@ class LearningService:
 
     def activate_rule(self, ctx: ExecutionContext, rule: Rule) -> Rule:
         """ACTIVE_RULE — only after REVIEW (fail closed)."""
+        self._require_profile(ctx)
+        rule = self._rule_for_context(ctx, rule)
         if rule.status != "REVIEWED":
             raise LearningError(
                 f"rule cannot be activated from status {rule.status}: "
                 "human review required (Doc 15)"
             )
+        if ctx.actor_id is None:
+            raise LearningError("activation requires an authenticated actor")
+        activator = self.session.scalars(
+            select(WorkspaceMember.id).where(
+                WorkspaceMember.workspace_id == ctx.workspace_id,
+                WorkspaceMember.user_id == ctx.actor_id,
+            )
+        ).first()
+        if activator is None:
+            raise LearningError("activator is not a workspace member")
         rule.status = "ACTIVE"
         self.session.flush()
         append_audit(
@@ -183,6 +262,14 @@ class LearningService:
         return rule
 
     def list_state(self, workspace_id, profile_id) -> dict:
+        profile_exists = self.session.scalars(
+            select(Profile.id).where(
+                Profile.id == profile_id,
+                Profile.workspace_id == workspace_id,
+            )
+        ).first()
+        if profile_exists is None:
+            raise LearningError("profile not found in workspace")
         experiments = list(
             self.session.scalars(
                 select(Experiment).where(

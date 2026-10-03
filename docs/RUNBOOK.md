@@ -31,6 +31,25 @@ cd apps/web && npm run dev   # → http://localhost:5173
 - `python -m scripts.backup assets` — backup de imagens originais/derivadas
 - `python -m scripts.benchmark` — suite de benchmarks (Doc 16)
 
+## Fila de jobs (urdia-enqueue)
+
+Jobs são criados por rotinas internas e pela ferramenta de operação — a
+constituição não expõe endpoint público de criação (Doc 02: só GET/retry/cancel).
+
+```bash
+# enfileirar um job (payload ganha eco de workspace/profile automaticamente)
+urdia-enqueue --type DISCOVERY_SCAN --workspace <uuid> --profile <uuid> \
+              --payload '{"source_id": "..."}' --priority 5
+
+# tipos aceitos = enum JobType (Doc 03); ver apps/worker/__main__.py
+urdia-enqueue --list            # 20 jobs mais recentes
+python -m apps.worker --once    # processa um ciclo
+```
+
+Fail-closed: payload sem os ids obrigatórios falha o job sem retry (Doc 03);
+provider indisponível/rate-limit reenfileira com checkpoint. Registro completo
+de handlers reais vs stubs: `apps/worker/handlers_new.py` (docstring) e
+
 ## Backups (Doc 07)
 
 ```bash

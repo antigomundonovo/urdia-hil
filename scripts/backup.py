@@ -44,7 +44,7 @@ def backup_database() -> int:
 
 
 def backup_assets() -> int:
-    BACKUP_DIR.mkdir(exist_ok=True)
+    BACKUP_DIR.mkdir(exist_ok=True, parents=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     target = BACKUP_DIR / f"assets-{stamp}.zip"
     count = 0
@@ -53,9 +53,10 @@ def backup_assets() -> int:
             base = Path(root)
             if not base.exists():
                 continue
-            for file in base.rglob("*"):
+            for file in sorted(base.rglob("*")):
                 if file.is_file():
-                    archive.write(file, file.as_posix())
+                    arcname = file.relative_to(Path.cwd()).as_posix()
+                    archive.write(file, arcname)
                     count += 1
     print(f"backup de assets: {target} ({count} arquivos)")
     return 0
@@ -90,14 +91,16 @@ def verify_backup(file: str) -> int:
         return 1
     if path.suffix == ".sql":
         head = path.read_text(errors="replace")[:20000]
-        ok = "PostgreSQL database dump" in head or "CREATE TABLE" in head
+        ok = any(marker in head for marker in ("PostgreSQL database dump", "CREATE TABLE", "COPY ", "-- Dumped"))
         print(f"{'OK' if ok else 'FALHA'}: dump SQL {'contém' if ok else 'NÃO contém'} estrutura esperada")
         return 0 if ok else 1
     if path.suffix == ".zip":
         with zipfile.ZipFile(path) as archive:
             bad = archive.testzip()
-        print(f"{'OK' if bad is None else f'FALHA: {bad}'}: zip íntegro")
-        return 0 if bad is None else 1
+            members = archive.namelist()
+        ok = bad is None and bool(members)
+        print(f"{'OK' if ok else 'FALHA'}: zip {'integridade ok' if ok else f'com defeito: {bad}'}")
+        return 0 if ok else 1
     print("tipo de backup desconhecido", file=sys.stderr)
     return 1
 

@@ -2,8 +2,7 @@
 GET /api/v1/providers, GET /api/v1/capabilities, GET /api/v1/audit.
 
 Read-only, workspace-scoped. Authorization is revalidated server-side
-(Doc 08); when auth lands (open V1 ambiguity), the caller identity will
-replace the explicit workspace_id parameter.
+(Doc 08); caller identity and workspace membership are required.
 """
 
 from uuid import UUID

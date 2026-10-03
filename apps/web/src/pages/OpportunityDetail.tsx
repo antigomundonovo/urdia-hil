@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
-import { useState } from "react";
-import { api, Opportunity, QcResult } from "../api";
+import { useEffect, useRef, useState } from "react";
+import { api, ContentPackage, Opportunity, QcResult } from "../api";
 import { useProfile } from "../profile";
 import { StateBadge } from "./Opportunities";
 
@@ -12,10 +12,22 @@ export default function OpportunityDetail() {
   const [platform, setPlatform] = useState("instagram");
   const [qc, setQc] = useState<QcResult | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [format, setFormat] = useState("PHOTO_POST");
   const [packageId, setPackageId] = useState<string | null>(null);
+  const [usedClaimIds, setUsedClaimIds] = useState<string[]>([]);
   const [draftTitle, setDraftTitle] = useState("");
   const [draftCaption, setDraftCaption] = useState("");
+  const hydratedPackageId = useRef<string | null>(null);
+
+  useEffect(() => {
+    setPackageId(null);
+    setUsedClaimIds([]);
+    setDraftTitle("");
+    setDraftCaption("");
+    setQc(null);
+    hydratedPackageId.current = null;
+  }, [id, workspaceId]);
 
   const { data: opp } = useQuery({
     queryKey: ["opportunity", id, workspaceId],
@@ -24,11 +36,55 @@ export default function OpportunityDetail() {
       api.get<Opportunity>(`/api/v1/opportunities/${id}?workspace_id=${workspaceId}`),
   });
 
+  useEffect(() => {
+    if (opp?.content_package_id && opp.content_package_id !== packageId) {
+      setPackageId(opp.content_package_id);
+    }
+  }, [opp?.content_package_id, packageId]);
+
+  const {
+    data: contentPackage,
+    error: contentPackageError,
+  } = useQuery({
+    queryKey: ["content-package", packageId, workspaceId],
+    enabled: !!packageId && !!workspaceId,
+    queryFn: () =>
+      api.get<ContentPackage>(
+        `/api/v1/content/${packageId}?workspace_id=${workspaceId}`
+      ),
+  });
+
+  useEffect(() => {
+    if (!contentPackage || hydratedPackageId.current === contentPackage.id) return;
+    hydratedPackageId.current = contentPackage.id;
+    const latestDraft = contentPackage.drafts.at(-1);
+    setDraftTitle(latestDraft?.title ?? "");
+    setDraftCaption(latestDraft?.caption ?? "");
+    setUsedClaimIds(latestDraft?.claim_ids_used ?? []);
+    setQc(
+      contentPackage.latest_qc?.is_current
+        ? {
+            status: contentPackage.latest_qc.status,
+            gates: contentPackage.latest_qc.gates,
+            blocking_issues: [],
+            warnings: [],
+          }
+        : null
+    );
+  }, [contentPackage]);
+
   const runQc = useMutation({
     mutationFn: () =>
       api.post<QcResult>(`/api/v1/opportunities/${id}/run-qc?workspace_id=${workspaceId}`),
-    onSuccess: (result) => setQc(result),
-    onError: (e) => setMessage((e as Error).message),
+    onSuccess: async (result) => {
+      setQc(result);
+      setActionError(null);
+      await queryClient.invalidateQueries({
+        queryKey: ["content-package", packageId, workspaceId],
+      });
+      await queryClient.invalidateQueries({ queryKey: ["opportunity", id] });
+    },
+    onError: (e) => setActionError((e as Error).message),
   });
   const approve = useMutation({
     mutationFn: () =>
@@ -36,7 +92,9 @@ export default function OpportunityDetail() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["opportunity", id] });
       setMessage("Aprovado — registrado no cartório.");
+      setActionError(null);
     },
+    onError: (e) => setActionError((e as Error).message),
   });
   const reject = useMutation({
     mutationFn: () =>
@@ -46,11 +104,37 @@ export default function OpportunityDetail() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["opportunity", id] });
       setMessage("Rejeitado — registrado no cartório.");
+      setActionError(null);
     },
+    onError: (e) => setActionError((e as Error).message),
+  });
+  const exportPackage = useMutation({
+    mutationFn: async () => {
+      await api.post<{ export_path: string; platform: string }>(
+        `/api/v1/content/${packageId}/export?workspace_id=${workspaceId}`,
+        { platform }
+      );
+      await api.download(
+        `/api/v1/content/${packageId}/export/download?workspace_id=${workspaceId}`,
+        `urdia-export-${packageId}.zip`
+      );
+    },
+    onSuccess: () => {
+      setMessage("Pacote exportado e baixado. A publicação na plataforma deve ser feita manualmente.");
+      setActionError(null);
+    },
+    onError: (e) => setActionError((e as Error).message),
   });
 
   if (!opp) return <p className="text-sm text-stone-400">carregando…</p>;
 
+  const savedDraft = contentPackage?.drafts.at(-1);
+  const draftIsDirty =
+    !!packageId &&
+    (draftTitle !== (savedDraft?.title ?? "") ||
+      draftCaption !== (savedDraft?.caption ?? "") ||
+      JSON.stringify(usedClaimIds) !==
+        JSON.stringify(savedDraft?.claim_ids_used ?? []));
   const row = "flex items-start justify-between gap-4 border-b border-stone-100 py-3";
 
   return (
@@ -108,10 +192,16 @@ export default function OpportunityDetail() {
                 )
                 .then((r) => {
                   setPackageId(r.package_id);
+                  hydratedPackageId.current = null;
+                  setUsedClaimIds([]);
+                  setQc(null);
+                  setActionError(null);
                   setMessage(`Pacote criado (${format}). Escreva o rascunho abaixo.`);
+                  queryClient.invalidateQueries({ queryKey: ["opportunity", id] });
                 })
-                .catch((e) => setMessage((e as Error).message))
+                .catch((e) => setActionError((e as Error).message))
             }
+            disabled={!!packageId || !!opp.content_package_id}
             className="rounded border border-stone-300 px-4 py-2 text-sm font-medium hover:bg-stone-50"
           >
             Criar conteúdo
@@ -119,15 +209,25 @@ export default function OpportunityDetail() {
         </div>
         {packageId && (
           <div className="mt-4 space-y-2">
+            {!contentPackage && !contentPackageError && (
+              <p className="text-sm text-stone-500">Carregando pacote e rascunho…</p>
+            )}
+            {contentPackageError && (
+              <p role="alert" className="text-sm text-red-700">
+                Não foi possível recuperar o pacote: {contentPackageError.message}
+              </p>
+            )}
             <input
               value={draftTitle}
               onChange={(e) => setDraftTitle(e.target.value)}
+              disabled={!contentPackage || !!contentPackageError}
               placeholder="título do post"
               className="w-full rounded border border-stone-300 px-3 py-2 text-sm"
             />
             <textarea
               value={draftCaption}
               onChange={(e) => setDraftCaption(e.target.value)}
+              disabled={!contentPackage || !!contentPackageError}
               placeholder="legenda — a prova (claim) usada fica rastreável no sistema"
               rows={3}
               className="w-full rounded border border-stone-300 px-3 py-2 text-sm"
@@ -137,20 +237,68 @@ export default function OpportunityDetail() {
                 api
                   .post<{ draft_id: string }>(
                     `/api/v1/content/${packageId}/generate-draft?workspace_id=${workspaceId}`,
-                    { title: draftTitle, caption: draftCaption, claim_ids_used: [] }
+                    {
+                      title: draftTitle,
+                      caption: draftCaption,
+                      claim_ids_used: usedClaimIds,
+                    }
                   )
-                  .then(() => setMessage("Rascunho salvo — rode o QC e decida."))
-                  .catch((e) => setMessage((e as Error).message))
+                  .then(() => {
+                    setQc(null);
+                    setActionError(null);
+                    setMessage("Rascunho salvo — rode o QC e decida.");
+                    void queryClient.invalidateQueries({
+                      queryKey: ["content-package", packageId, workspaceId],
+                    });
+                    void queryClient.invalidateQueries({ queryKey: ["opportunity", id] });
+                  })
+                  .catch((e) => setActionError((e as Error).message))
               }
-              disabled={!draftTitle || !draftCaption}
+              disabled={!contentPackage || !!contentPackageError || !draftTitle || !draftCaption}
               className="rounded bg-stone-900 px-4 py-2 text-sm font-medium text-white hover:bg-stone-700 disabled:opacity-40"
             >
               Salvar rascunho
             </button>
+            {opp.claims && opp.claims.length > 0 ? (
+              <fieldset className="space-y-2 rounded border border-stone-200 p-3">
+                <legend className="px-1 text-sm font-medium text-stone-700">
+                  Claims realmente usadas no rascunho
+                </legend>
+                {opp.claims.map((claim) => (
+                  <label key={claim.id} className="flex items-start gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={usedClaimIds.includes(claim.id)}
+                      onChange={(event) =>
+                        setUsedClaimIds((current) =>
+                          event.target.checked
+                            ? [...current, claim.id]
+                            : current.filter((claimId) => claimId !== claim.id)
+                        )
+                      }
+                      className="mt-1"
+                    />
+                    <span>
+                      {claim.text || "Claim sem descrição"}
+                      <span className="ml-2 text-xs text-stone-500">{claim.status}</span>
+                    </span>
+                  </label>
+                ))}
+              </fieldset>
+            ) : (
+              <p className="text-sm text-amber-800">
+                Nenhuma claim está vinculada. Adicione evidências antes de afirmar fatos.
+              </p>
+            )}
             <p className="text-xs text-stone-400">
-              O QC valida evidência e direitos pelas claims/assets já vinculados à oportunidade.
+              Selecione somente claims sustentadas que aparecem no texto; o QC bloqueará claims sem evidência.
             </p>
           </div>
+        )}
+        {contentPackage?.latest_qc && !contentPackage.latest_qc.is_current && (
+          <p className="mt-3 text-sm text-amber-800">
+            O QC salvo está desatualizado em relação ao conteúdo atual. Rode o QC novamente antes de aprovar.
+          </p>
         )}
       </section>
 
@@ -161,7 +309,13 @@ export default function OpportunityDetail() {
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <button
             onClick={() => approve.mutate()}
-            disabled={approve.isPending}
+            disabled={
+              approve.isPending ||
+              opp.state !== "QUALITY_CONTROL" ||
+              draftIsDirty ||
+              !qc ||
+              !["PASS", "WARNING"].includes(qc.status)
+            }
             className="rounded bg-green-700 px-4 py-2 text-sm font-medium text-white hover:bg-green-800 disabled:opacity-50"
           >
             APROVAR
@@ -173,6 +327,15 @@ export default function OpportunityDetail() {
           >
             REJEITAR
           </button>
+          {packageId && (
+            <button
+              onClick={() => exportPackage.mutate()}
+              disabled={exportPackage.isPending || opp.state !== "READY"}
+              className="rounded border border-amber-700 px-4 py-2 text-sm font-medium text-amber-900 hover:bg-amber-50 disabled:opacity-50"
+            >
+              {exportPackage.isPending ? "Exportando…" : "Exportar pacote"}
+            </button>
+          )}
           <input
             value={platform}
             onChange={(e) => setPlatform(e.target.value)}
@@ -181,15 +344,24 @@ export default function OpportunityDetail() {
           />
           <button
             onClick={() => runQc.mutate()}
+            disabled={!packageId || !contentPackage || draftIsDirty || runQc.isPending}
             className="rounded border border-stone-300 px-4 py-2 text-sm font-medium hover:bg-stone-50"
           >
-            Rodar QC
+            {runQc.isPending ? "Verificando…" : "Rodar QC"}
           </button>
         </div>
+        <p className="mt-2 text-xs text-stone-500">
+          A publicação direta ainda não está conectada; a exportação gera o pacote para publicação manual.
+        </p>
         {message && <p className="mt-3 text-sm text-green-700">{message}</p>}
-        {runQc.isError && (
-          <p className="mt-3 text-sm text-red-700">
-            QC indisponível para esta oportunidade: {(runQc.error as Error).message.slice(0, 140)}
+        {draftIsDirty && (
+          <p className="mt-3 text-sm text-amber-800">
+            Salve as alterações do rascunho antes de executar QC ou aprovar.
+          </p>
+        )}
+        {actionError && (
+          <p role="alert" className="mt-3 text-sm text-red-700">
+            {actionError}
           </p>
         )}
         {qc && (

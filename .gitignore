@@ -45,5 +45,14 @@ Thumbs.db
 .idea/
 .vscode/
 .pytest_tmp/
+.pytest_tmp_r/
 .pytest_tmp/
+.pytest_tmp_r/
 backups/
+
+# Ferramenta externa OpenCode (artefatos de operação — nunca versionar)
+roster.json
+roster-backups/
+hive
+restore-gate.json
+worktrees/

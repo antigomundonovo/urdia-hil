@@ -4,11 +4,13 @@ import uuid
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
+from apps.api.auth import get_current_user
 from apps.api.main import app
 from apps.worker.engine import JOB_FAILED, FatalJobError, JobEngine
 from packages.domain.enums import JobType
-from packages.domain.models import Job, Profile, Workspace
+from packages.domain.models import AuditEvent, Job, Profile, User, Workspace, WorkspaceMember
 from packages.shared.db import get_session
 
 
@@ -69,14 +71,34 @@ def test_list_and_get_scoped(client, db, world):
 def test_retry_endpoint_then_cancel(client, db, world):
     ws, profile = world
     job = _failed_job(db, ws, profile)
+    actor = User(email=f"jobs-api-{uuid.uuid4().hex[:8]}@test.com")
+    db.add(actor)
+    db.flush()
+    db.add(WorkspaceMember(workspace_id=ws.id, user_id=actor.id))
+    db.commit()
+    app.dependency_overrides[get_current_user] = lambda: actor
 
     retried = client.post(f"/api/v1/jobs/{job.id}/retry?workspace_id={ws.id}")
     assert retried.status_code == 200
     assert retried.json()["status"] == "PENDING"
+    retry_audit = db.scalars(
+        select(AuditEvent).where(
+            AuditEvent.entity_id == job.id,
+            AuditEvent.action == "JOB_RETRY_REQUESTED",
+        )
+    ).one()
+    assert retry_audit.actor_id == actor.id
 
     cancelled = client.post(f"/api/v1/jobs/{job.id}/cancel?workspace_id={ws.id}")
     assert cancelled.status_code == 200
     assert cancelled.json()["status"] == "CANCELLED"
+    cancel_audit = db.scalars(
+        select(AuditEvent).where(
+            AuditEvent.entity_id == job.id,
+            AuditEvent.action == "JOB_CANCELLED",
+        )
+    ).one()
+    assert cancel_audit.actor_id == actor.id
 
     # SUCCEEDED jobs cannot be cancelled; foreign workspace gets 404
     ghost = uuid.uuid4()

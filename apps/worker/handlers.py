@@ -24,14 +24,20 @@ def discovery_scan(ctx: ExecutionContext, payload: dict[str, Any], progress: Job
     workspace_id = uuid.UUID(str(payload["workspace_id"]))
     profile_id = uuid.UUID(str(payload["profile_id"])) if payload.get("profile_id") else None
     source_id = uuid.UUID(str(payload["source_id"])) if payload.get("source_id") else None
+    if workspace_id != ctx.workspace_id or profile_id != ctx.profile_id:
+        raise ValueError("discovery payload scope does not match job context")
 
     with SessionLocal() as session:
         fetcher = SafeFetcher()
         engine = DiscoveryEngine(session, fetcher)
         if source_id is not None:
             source = session.get(Source, source_id)
-            if source is None or source.workspace_id != workspace_id:
-                raise ValueError("source not found in workspace")
+            if (
+                source is None
+                or source.workspace_id != ctx.workspace_id
+                or source.profile_id != ctx.profile_id
+            ):
+                raise ValueError("source not found in job profile")
             sources = [source]
         elif profile_id is not None:
             sources = engine.active_sources(workspace_id, profile_id)
@@ -59,7 +65,7 @@ def claim_verification(
     profile claims when no story_id is given."""
     from sqlalchemy import select
 
-    from packages.domain.knowledge import Claim
+    from packages.domain.knowledge import Claim, Story
     from packages.research.verification import KnowledgeService
 
     progress.done("resolve_claims")
@@ -67,14 +73,27 @@ def claim_verification(
     workspace_id = uuid.UUID(str(payload["workspace_id"]))
     profile_id = uuid.UUID(str(payload["profile_id"])) if payload.get("profile_id") else None
     story_id = uuid.UUID(str(payload["story_id"])) if payload.get("story_id") else None
+    if workspace_id != ctx.workspace_id or profile_id != ctx.profile_id:
+        raise ValueError("verification payload scope does not match job context")
 
     with SessionLocal() as session:
         service = KnowledgeService(session)
-        stmt = select(Claim).where(Claim.workspace_id == workspace_id)
+        if story_id is not None:
+            story = session.scalars(
+                select(Story.id).where(
+                    Story.id == story_id,
+                    Story.workspace_id == ctx.workspace_id,
+                    Story.profile_id == ctx.profile_id,
+                )
+            ).first()
+            if story is None:
+                raise ValueError("story not found in job profile")
+        stmt = select(Claim).where(
+            Claim.workspace_id == ctx.workspace_id,
+            Claim.profile_id == ctx.profile_id,
+        )
         if story_id is not None:
             stmt = stmt.where(Claim.story_id == story_id)
-        elif profile_id is not None:
-            stmt = stmt.where(Claim.profile_id == profile_id)
         claims = list(session.scalars(stmt))
         outcomes = {
             str(claim.id): service.verify_claim(ctx, claim).verdict.value for claim in claims

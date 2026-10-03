@@ -1,6 +1,6 @@
-# URDIA — History Intelligence Layer (HIL)
+# URDIA-HIL — Social & Audience Intelligence
 
-Motor de **Inteligência Editorial Histórica**. Produto inicial: **Antigo Mundo Novo**.
+Camada de **Inteligência Social e de Audiência** do ecossistema URDIA. O HIL trata comentários, Social Inbox, triagem, demanda, feedback, oportunidades, Audience Pulse, Response Debt e factuality challenges, mantendo uma fronteira explícita com o URDIA Studio, que é responsável pelo pipeline de vídeo.
 
 > **DESCUBRA MUITO. AFIRME POUCO. PROVE O QUE AFIRMAR. MOSTRE O QUE NÃO SABE. CONTE SOMENTE O QUE MERECE SER CONTADO. APRENDA COM O RESULTADO.**
 
@@ -8,19 +8,27 @@ Motor de **Inteligência Editorial Histórica**. Produto inicial: **Antigo Mundo
 
 ## O que é
 
-O HIL não é um gerador simples de posts. É um pipeline editorial completo:
+O HIL não é um gerador de vídeo nem uma cópia do Studio. Ele é a camada social/audience que transforma sinais da audiência em informação estruturada e auditável:
 
 ```text
-DESCOBRIR → PESQUISAR → ORGANIZAR → CONFRONTAR → VERIFICAR → ENTENDER → DECIDIR → CRIAR → ADAPTAR → PUBLICAR → MEDIR → APRENDER
+AUDIÊNCIA → COMENTÁRIOS → TRIAGEM → DEMANDA → FEEDBACK → INTELIGÊNCIA → DECISÃO HUMANA → STUDIO/HIL
 ```
 
-Nunca considerar LLM output como fato por si só. O sistema tem capacidade explícita de `NÃO PUBLICAR`.
+Nunca considerar comentário ou saída de LLM como evidência por si só. O sistema preserva a capacidade explícita de `NÃO PUBLICAR` e exige revisão humana para decisões externas.
 
 ## Fonte de verdade
 
 A **Constituição** (`docs/constitution/00_HIL_MASTER_CONSTITUTION_V1.0.md`) é a fonte de verdade do produto e da arquitetura. Os Documentos 01–16 transformam essa constituição em implementação.
 
 Leia na ordem definida em [`docs/constitution/README_START_HERE.md`](docs/constitution/README_START_HERE.md).
+
+### Classificação auxiliar opcional
+
+Laya pode ser habilitada como provider opcional de decisões tipadas, sempre
+consultivas e sem autoridade sobre fatos, direitos, QC ou publicação. Instalação,
+ativação explícita, limites e licença estão documentados em
+[`docs/LAYA_INTEGRATION.md`](docs/LAYA_INTEGRATION.md); a instalação normal do
+URDIA não instala essa dependência nem baixa modelos.
 
 ### Regra de autoridade
 
@@ -49,7 +57,7 @@ Pillow / SVG / FFmpeg
 DuckDB
 ```
 
-Provider-agnostic. Desktop-first / Windows / Local-first.
+Provider-agnostic. **Web-first** (browser: FastAPI + React/Vite) / Windows dev / Local-first — os dados e segredos permanecem na máquina do operador.
 
 ## Estrutura do monorepo
 
@@ -85,15 +93,70 @@ Pré-requisitos: Git, Docker Desktop, Python, Node.js, FFmpeg.
 
 ```bash
 cp .env.example .env        # definir POSTGRES_PASSWORD e demais variáveis
+python -m scripts.doctor    # valida app env + conexão com o Postgres
+# ou: urdia-doctor
+
 docker compose up -d postgres
 alembic upgrade head
 python -m scripts.seed
+# ou: urdia-seed
+
 uvicorn apps.api.main:app --host 127.0.0.1 --port 8000
 python -m apps.worker
 cd apps/web && npm install && npm run dev
 ```
 
 Health check: `GET /api/v1/health`
+
+Diagnóstico operacional: `python -m scripts.doctor` (ou `urdia-doctor`) imprime o ambiente e a URL do banco com senha mascarada para validar o bootstrap sem expor segredos em logs.
+
+## Geração assistida (LLM opcional)
+
+Configure `GOOGLE_AI_API_KEY` no `.env` (Google AI Studio) para habilitar a
+geração assistida de rascunhos (agente Copywriter, Gemini) e a análise visual
+de imagens. A saída do LLM é sempre uma **proposta**: passa por validação de
+schema, gate semântico determinístico (só claims anexados e verificados), QC
+e aprovação humana antes de qualquer publicação. Provider/modelo registrados
+em [`docs/PROVIDERS.md`](docs/PROVIDERS.md); troca exige benchmark (Doc 17 §9/§15).
+
+## Worker e fila de jobs
+
+```bash
+python -m apps.worker            # residente: processa a fila continuamente
+python -m apps.worker --once     # processa um ciclo e sai (CI/testes)
+urdia-enqueue --type DISCOVERY_SCAN --workspace <uuid> --profile <uuid>
+urdia-enqueue --list             # 20 jobs mais recentes
+```
+
+Jobs são criados por rotinas internas e pela ferramenta de operação
+`urdia-enqueue` (a constituição não expõe endpoint público de criação).
+Cada job carrega checkpoint e retry classificado (Doc 03); jobs `RUNNING`
+órfãos são reenfileirados no restart.
+
+## Publicação (redes sociais)
+
+Redes oficiais (AMENDMENT-011): **Instagram, Facebook, X (Twitter), YouTube,
+TikTok, Threads, Kwai**. Política: rede com API oficial publica direto da
+URDIA — **sempre após aprovação humana**; rede sem API (Kwai; posts de
+comunidade do YouTube) recebe um **kit de postagem manual completo** no
+export (`platform_variants/<rede>/MANUAL_POSTING.md`) e a publicação é
+confirmada no sistema depois de feita. Matriz de capacidades e requisitos:
+[`docs/PLATFORM_CAPABILITIES.md`](docs/PLATFORM_CAPABILITIES.md).
+
+## Conta e sessão
+
+Na interface, crie uma conta com e-mail e senha de pelo menos 12 caracteres.
+Cada cadastro recebe um workspace privado e precisa confirmar o e-mail antes
+de entrar. Configure `SMTP_HOST`, `SMTP_FROM_EMAIL` e, se exigido pelo servidor,
+`SMTP_USERNAME`/`SMTP_PASSWORD` no `.env`; mensagens usam STARTTLS por padrão
+(`SMTP_USE_SSL=true` habilita TLS implícito, normalmente na porta 465).
+A sessão usa cookie HttpOnly com expiração de 12 horas; **Sair** a revoga.
+Há fluxo de redefinição de senha por link de uso único. Endpoints de dados
+exigem sessão válida e membership no workspace. Ainda não há conexão OAuth
+com redes/plataformas; não exponha auto-cadastro publicamente até adicionar
+rate limiting compartilhado entre processos e MFA. Em produção, use
+`FRONTEND_BASE_URL` com HTTPS e configure o SMTP com STARTTLS ou TLS implícito
+(`SMTP_USE_SSL=true`).
 
 ## Segurança obrigatória
 

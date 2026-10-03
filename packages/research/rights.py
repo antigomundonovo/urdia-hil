@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from packages.domain.assets import Asset, RightsRecord
 from packages.domain.enums import RightsClassification, RightsGateOutcome, rights_gate
+from packages.domain.models import Source
 from packages.governance.audit import append_audit
 from packages.shared.execution_context import ExecutionContext
 
@@ -50,6 +51,16 @@ class RightsService:
         `status` starts as the classification itself; only explicit
         verification (verify()) can mark it VERIFIED."""
         asset = self._asset_scoped(ctx, asset_id)
+        if evidence_source_id is not None:
+            source = self.session.scalars(
+                select(Source).where(
+                    Source.id == evidence_source_id,
+                    Source.workspace_id == asset.workspace_id,
+                    Source.profile_id == asset.profile_id,
+                )
+            ).first()
+            if source is None:
+                raise LookupError("evidence source not found in profile")
         record = RightsRecord(
             workspace_id=asset.workspace_id,
             profile_id=asset.profile_id,
@@ -93,6 +104,17 @@ class RightsService:
     ) -> RightsRecord:
         """Explicit verification step (Doc 11 workflow: classification →
         verification → publishable/blocked)."""
+        scoped_record = self.session.scalars(
+            select(RightsRecord).where(
+                RightsRecord.id == record.id,
+                RightsRecord.workspace_id == ctx.workspace_id,
+                RightsRecord.profile_id == ctx.profile_id,
+            )
+        ).first()
+        if scoped_record is None:
+            raise LookupError("rights record not found in profile")
+        self._asset_scoped(ctx, scoped_record.asset_id)
+        record = scoped_record
         record.status = "VERIFIED"
         record.verified_at = datetime.now(UTC)
         record.verified_by = verified_by
@@ -117,7 +139,11 @@ class RightsService:
         asset = self._asset_scoped(ctx, asset_id)
         record = self.session.scalars(
             select(RightsRecord)
-            .where(RightsRecord.asset_id == asset.id)
+            .where(
+                RightsRecord.asset_id == asset.id,
+                RightsRecord.workspace_id == ctx.workspace_id,
+                RightsRecord.profile_id == ctx.profile_id,
+            )
             .order_by(RightsRecord.created_at.desc())
             .limit(1)
         ).first()
@@ -128,9 +154,14 @@ class RightsService:
         return rights_gate(RightsClassification(record.classification))
 
     def latest_record(self, ctx: ExecutionContext, asset_id) -> RightsRecord | None:
+        asset = self._asset_scoped(ctx, asset_id)
         return self.session.scalars(
             select(RightsRecord)
-            .where(RightsRecord.asset_id == asset_id)
+            .where(
+                RightsRecord.asset_id == asset.id,
+                RightsRecord.workspace_id == ctx.workspace_id,
+                RightsRecord.profile_id == ctx.profile_id,
+            )
             .order_by(RightsRecord.created_at.desc())
             .limit(1)
         ).first()
@@ -139,6 +170,10 @@ class RightsService:
 
     def _asset_scoped(self, ctx: ExecutionContext, asset_id) -> Asset:
         asset = self.session.get(Asset, asset_id)
-        if asset is None or asset.workspace_id != ctx.workspace_id:
-            raise LookupError("asset not found in workspace")
+        if (
+            asset is None
+            or asset.workspace_id != ctx.workspace_id
+            or asset.profile_id != ctx.profile_id
+        ):
+            raise LookupError("asset not found in profile")
         return asset

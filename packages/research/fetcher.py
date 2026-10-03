@@ -147,10 +147,17 @@ class SafeFetcher:
             robots_url = urljoin(base, "/robots.txt")
             try:
                 if self._robot_loader is not None:
-                    parser.parse(self._robot_loader(base).splitlines())
+                    body = self._robot_loader(base).encode()
+                    if len(body) > self.max_bytes:
+                        raise FetchBlockedError(
+                            f"robots response too large: more than {self.max_bytes} bytes"
+                        )
                 else:
-                    resp = self._http().get(robots_url, timeout=self._timeout)
-                    parser.parse(resp.text.splitlines() if resp.status_code == 200 else [])
+                    with self._http().stream("GET", robots_url, timeout=self._timeout) as resp:
+                        body = self._read_limited(resp) if resp.status_code == 200 else b""
+                parser.parse(body.decode(errors="replace").splitlines())
+            except FetchBlockedError:
+                raise
             except Exception:
                 # unreachable robots → allow but do not cache the failure
                 self._robots_cache[base] = None
@@ -160,6 +167,16 @@ class SafeFetcher:
         if parser is None:
             return True
         return parser.can_fetch("URDIA-HIL", url)
+
+    def _read_limited(self, response: httpx.Response) -> bytes:
+        content = bytearray()
+        for chunk in response.iter_bytes():
+            if len(content) + len(chunk) > self.max_bytes:
+                raise FetchBlockedError(
+                    f"response too large: more than {self.max_bytes} bytes"
+                )
+            content.extend(chunk)
+        return bytes(content)
 
     def fetch(
         self, url: str, *, etag: str | None = None, last_modified: str | None = None
@@ -183,41 +200,42 @@ class SafeFetcher:
             if not self._robots_allows(current):
                 raise FetchBlockedError(f"robots.txt disallows: {current}")
 
-            response = self._http().get(current, headers=headers_in)
+            with self._http().stream(
+                "GET", current, headers=headers_in, timeout=self._timeout
+            ) as response:
+                status_code = response.status_code
+                response_headers = response.headers
+                if status_code in (301, 302, 303, 307, 308):
+                    location = response_headers.get("location", "")
+                    if not location:
+                        raise FetchBlockedError("redirect without location")
+                elif status_code == 304:
+                    duration = int((time.monotonic() - started) * 1000)
+                    return FetchResult(
+                        url=url,
+                        status_code=304,
+                        content=b"",
+                        etag=response_headers.get("etag"),
+                        last_modified=response_headers.get("last-modified"),
+                        duration_ms=duration,
+                        redirect_hops=hops,
+                    )
+                else:
+                    content = self._read_limited(response)
 
-            if response.status_code in (301, 302, 303, 307, 308):
+            if status_code in (301, 302, 303, 307, 308):
                 hops += 1
-                location = response.headers.get("location", "")
-                if not location:
-                    raise FetchBlockedError("redirect without location")
                 current = validate_url(urljoin(current, location), self._resolver)
                 continue
 
-            if response.status_code == 304:
-                duration = int((time.monotonic() - started) * 1000)
-                return FetchResult(
-                    url=url,
-                    status_code=304,
-                    content=b"",
-                    etag=response.headers.get("etag"),
-                    last_modified=response.headers.get("last-modified"),
-                    duration_ms=duration,
-                    redirect_hops=hops,
-                )
-
-            content = response.content or b""
-            if len(content) > self.max_bytes:
-                raise FetchBlockedError(
-                    f"response too large: {len(content)} > {self.max_bytes} bytes"
-                )
             duration = int((time.monotonic() - started) * 1000)
             return FetchResult(
                 url=url,
-                status_code=response.status_code,
+                status_code=status_code,
                 content=content,
-                content_type=response.headers.get("content-type"),
-                etag=response.headers.get("etag"),
-                last_modified=response.headers.get("last-modified"),
+                content_type=response_headers.get("content-type"),
+                etag=response_headers.get("etag"),
+                last_modified=response_headers.get("last-modified"),
                 duration_ms=duration,
                 redirect_hops=hops,
             )

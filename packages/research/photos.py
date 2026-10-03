@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from packages.domain.assets import Asset
 from packages.domain.enums import VisualClassification
+from packages.domain.models import Profile
 from packages.governance.audit import append_audit
 from packages.shared.execution_context import ExecutionContext
 
@@ -70,7 +71,7 @@ def perceptual_hash(content: bytes, size: int = 16) -> str | None:
 
         with Image.open(io.BytesIO(content)) as image:
             gray = image.convert("L").resize((size, size))
-        pixels = list(gray.getdata())
+        pixels = list(gray.get_flattened_data())
         average = sum(pixels) / len(pixels)
         bits = "".join("1" if p > average else "0" for p in pixels)
         return f"{int(bits, 2):016x}"
@@ -96,6 +97,15 @@ class PhotoService:
         creator: str | None = None,
         creation_date: str | None = None,
     ) -> PhotoImport:
+        if ctx.profile_id is not None:
+            profile = self.session.scalars(
+                select(Profile).where(
+                    Profile.id == ctx.profile_id,
+                    Profile.workspace_id == ctx.workspace_id,
+                )
+            ).first()
+            if profile is None:
+                raise LookupError("profile not found in workspace")
         # 1. file validation (Doc 08): size, extension allowlist, magic bytes
         if not content:
             raise UploadRejected("empty file")
@@ -117,6 +127,7 @@ class PhotoService:
             select(Asset)
             .where(
                 Asset.workspace_id == ctx.workspace_id,
+                Asset.profile_id == ctx.profile_id,
                 Asset.file_hash == file_hash,
                 Asset.status == "ACTIVE",
             )
@@ -168,18 +179,24 @@ class PhotoService:
     def find_similar(self, ctx: ExecutionContext, perceptual_hash: str) -> list[Asset]:
         """Origin LEADS only (Doc 10 identity rule) — similarity never proves
         identity; callers must confirm with provenance/context/evidence."""
+        if not perceptual_hash:
+            return []
         return list(
             self.session.scalars(
                 select(Asset).where(
                     Asset.workspace_id == ctx.workspace_id,
+                    Asset.profile_id == ctx.profile_id,
                     Asset.perceptual_hash == perceptual_hash,
                     Asset.status == "ACTIVE",
                 )
             )
         )
 
-    def get_scoped(self, asset_id, workspace_id) -> Asset | None:
-        asset = self.session.get(Asset, asset_id)
-        if asset is None or asset.workspace_id != workspace_id:
-            return None
-        return asset
+    def get_scoped(self, asset_id, ctx: ExecutionContext) -> Asset | None:
+        return self.session.scalars(
+            select(Asset).where(
+                Asset.id == asset_id,
+                Asset.workspace_id == ctx.workspace_id,
+                Asset.profile_id == ctx.profile_id,
+            )
+        ).first()

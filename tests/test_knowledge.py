@@ -57,7 +57,7 @@ def test_new_claim_starts_unknown_and_not_ready(db, world):
     claim = _claim(db, world)
     assert claim.status is UncertaintyState.UNKNOWN
     service = KnowledgeService(db)
-    assert not service.claims_pipeline_ready([claim.id])
+    assert not service.claims_pipeline_ready(_ctx(ws, profile), [claim.id])
 
 
 def test_single_independent_support_is_possible(db, world):
@@ -69,8 +69,7 @@ def test_single_independent_support_is_possible(db, world):
         source_id=_source(db, world).id, evidence_type="document",
     )
     assert claim.status is UncertaintyState.POSSIBLE
-    assert service.claims_pipeline_ready([claim.id]) is not None  # has support now
-    assert service.claims_pipeline_ready([claim.id]) is True
+    assert service.claims_pipeline_ready(_ctx(ws, profile), [claim.id])
 
 
 def test_copy_is_not_independence(db, world):
@@ -163,6 +162,84 @@ def test_evidence_for_foreign_workspace_fails_closed(db, world):
         KnowledgeService(db).add_evidence(foreign_ctx, claim_id=claim.id, supports=True)
 
 
+def test_evidence_and_verification_are_profile_scoped(db, world):
+    ws, profile = world
+    claim = _claim(db, world)
+    other_profile = Profile(
+        workspace_id=ws.id,
+        key="other",
+        name="Other",
+    )
+    db.add(other_profile)
+    db.flush()
+    foreign_ctx = _ctx(ws, other_profile)
+    service = KnowledgeService(db)
+
+    with pytest.raises(LookupError):
+        service.add_evidence(foreign_ctx, claim_id=claim.id, supports=True)
+    with pytest.raises(LookupError):
+        service.verify_claim(foreign_ctx, claim)
+    assert not service.claims_pipeline_ready(foreign_ctx, [claim.id])
+    assert service.evidence_for(claim) == []
+
+
+def test_evidence_cannot_reference_source_from_another_profile(db, world):
+    ws, profile = world
+    claim = _claim(db, world)
+    other_profile = Profile(
+        workspace_id=ws.id,
+        key="other-source",
+        name="Other source profile",
+    )
+    db.add(other_profile)
+    db.flush()
+    source = Source(
+        workspace_id=ws.id,
+        profile_id=other_profile.id,
+        url=f"https://foreign-{uuid.uuid4().hex[:8]}.test/doc",
+        source_type="rss",
+    )
+    db.add(source)
+    db.flush()
+
+    with pytest.raises(LookupError):
+        KnowledgeService(db).add_evidence(
+            _ctx(ws, profile),
+            claim_id=claim.id,
+            supports=True,
+            source_id=source.id,
+        )
+
+
+def test_claim_cannot_attach_story_from_another_profile(db, world):
+    from packages.domain.knowledge import Story
+
+    ws, profile = world
+    other_profile = Profile(
+        workspace_id=ws.id,
+        key="other-story",
+        name="Other story profile",
+    )
+    db.add(other_profile)
+    db.flush()
+    story = Story(
+        workspace_id=ws.id,
+        profile_id=other_profile.id,
+        title="Private story",
+    )
+    db.add(story)
+    db.flush()
+
+    with pytest.raises(LookupError):
+        KnowledgeService(db).add_claim(
+            _ctx(ws, profile),
+            story_id=story.id,
+            subject="Subject",
+            predicate="is",
+            object="object",
+        )
+
+
 def test_claim_events_are_audited(db, world):
     ws, profile = world
     claim = _claim(db, world)
@@ -198,3 +275,47 @@ def test_verification_job_updates_claims(db, world):
     assert job.status == JOB_SUCCEEDED
     assert job.result["verified"] >= 1
     assert claim.status is UncertaintyState.UNKNOWN  # still no evidence
+
+
+def test_verification_job_rejects_story_from_another_profile(db, world):
+    from apps.worker.engine import JOB_FAILED, JobEngine
+    from apps.worker.handlers import claim_verification
+    from packages.domain.enums import JobType
+    from packages.domain.knowledge import Story
+    from packages.domain.models import Job
+
+    ws, profile = world
+    other_profile = Profile(
+        workspace_id=ws.id,
+        key="private-story",
+        name="Private story profile",
+    )
+    db.add(other_profile)
+    db.flush()
+    story = Story(
+        workspace_id=ws.id,
+        profile_id=other_profile.id,
+        title="Private story",
+    )
+    db.add(story)
+    db.flush()
+    job = Job(
+        workspace_id=ws.id,
+        profile_id=profile.id,
+        job_type=JobType.CLAIM_VERIFICATION,
+        priority=999,
+        payload={
+            "workspace_id": str(ws.id),
+            "profile_id": str(profile.id),
+            "story_id": str(story.id),
+        },
+    )
+    db.add(job)
+    db.commit()
+
+    engine = JobEngine(db, {"CLAIM_VERIFICATION": claim_verification})
+    assert engine.claim_next() is job
+    engine.run_job(job)
+
+    assert job.status == JOB_FAILED
+    assert "story not found in job profile" in job.error
