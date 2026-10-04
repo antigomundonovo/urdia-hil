@@ -133,6 +133,11 @@ def exchange_code(
         raise HTTPException(status_code=409, detail=f"tiktok exchange failed: {message}")
 
     _persist_env_var("TIKTOK_ACCESS_TOKEN", str(data["access_token"]))
+    refresh_token = str(data.get("refresh_token", ""))
+    if refresh_token:
+        # Sem isto o token morre em ~24h sem jeito de renovar (lição de
+        # 2026-10-04: a primeira sessão não guardou o refresh token).
+        _persist_env_var("TIKTOK_REFRESH_TOKEN", refresh_token)
     open_id = str(data.get("open_id", ""))
     if open_id:
         _persist_env_var("TIKTOK_OPEN_ID", open_id)
@@ -141,7 +146,66 @@ def exchange_code(
         "open_id": open_id,
         "scope": data.get("scope"),
         "expires_in": data.get("expires_in"),
-        "stored": "TIKTOK_ACCESS_TOKEN written to local .env",
+        "refresh_stored": bool(refresh_token),
+        "stored": "TIKTOK_ACCESS_TOKEN + TIKTOK_REFRESH_TOKEN written to local .env",
+    }
+
+
+@router.post("/refresh")
+def refresh_access_token(user: User = Depends(get_current_user)) -> dict:
+    """Renova o access token com o refresh_token guardado (TikTok v2)."""
+    s = _settings()
+    refresh_token = ""
+    from pathlib import Path as _P
+
+    env_path = _P(".env")
+    if env_path.exists():
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            if line.strip().startswith("TIKTOK_REFRESH_TOKEN="):
+                refresh_token = line.split("=", 1)[1].strip()
+                break
+    if not refresh_token:
+        raise HTTPException(
+            status_code=409,
+            detail="tiktok: no TIKTOK_REFRESH_TOKEN stored — reconnect via /authorize + /exchange",
+        )
+    try:
+        r = httpx.post(
+            TOKEN_URL,
+            data={
+                "client_key": s.tiktok_client_key,
+                "client_secret": s.tiktok_client_secret,
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+            },
+            headers={"content-type": "application/x-www-form-urlencoded"},
+            timeout=30,
+        )
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502, detail=f"tiktok: network error {exc.__class__.__name__}"
+        ) from exc
+    data = r.json() if r.status_code == 200 else {}
+    if r.status_code != 200 or not data.get("access_token"):
+        try:
+            error_body = r.json()
+        except Exception:
+            error_body = {}
+        message = (
+            error_body.get("error_description")
+            or error_body.get("error")
+            or error_body.get("message")
+            or f"HTTP {r.status_code}"
+        )
+        raise HTTPException(status_code=409, detail=f"tiktok refresh failed: {message}")
+    _persist_env_var("TIKTOK_ACCESS_TOKEN", str(data["access_token"]))
+    new_refresh = str(data.get("refresh_token", ""))
+    if new_refresh:
+        _persist_env_var("TIKTOK_REFRESH_TOKEN", new_refresh)
+    return {
+        "status": "refreshed",
+        "scope": data.get("scope"),
+        "expires_in": data.get("expires_in"),
     }
 
 
