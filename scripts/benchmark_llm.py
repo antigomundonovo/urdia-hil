@@ -5,6 +5,7 @@ Uso:
     python -m scripts.benchmark_llm            # baseline determinístico (sem rede, CI-safe)
     python -m scripts.benchmark_llm --live     # inclui chamada real ao Gemini (consome tokens)
     python -m scripts.benchmark_llm --live --throttle 30   # espaça chamadas (free tier)
+    python -m scripts.benchmark_llm --gateway   # via gateway OpenAI-compat (OmniRoute local)
 
 Grava JSON em artifacts/ e imprime resumo. Exit 1 se o baseline
 determinístico falhar em qualquer gate (o harness em si está quebrado).
@@ -31,6 +32,7 @@ BASELINE = "deterministic-baseline"
 
 def main() -> int:
     live = "--live" in sys.argv
+    use_gateway = "--gateway" in sys.argv
     throttle = 0.0
     if "--throttle" in sys.argv:
         throttle = float(sys.argv[sys.argv.index("--throttle") + 1])
@@ -40,10 +42,26 @@ def main() -> int:
     has_key = bool(getattr(settings, "google_ai_api_key", None))
     gemini_adapter = GeminiProvider() if (has_key and live) else None
 
+    gateway_adapter = None
+    gateway_label = "gateway"
+    if use_gateway:
+        from packages.providers.openai_compat import OpenAICompatProvider
+
+        s = get_settings()
+        if s.llm_gateway_base_url and s.llm_gateway_api_key:
+            gateway_adapter = OpenAICompatProvider(
+                base_url=s.llm_gateway_base_url,
+                api_key=s.llm_gateway_api_key,
+                model=s.llm_gateway_model,
+                provider_label=s.llm_gateway_label,
+            )
+            gateway_label = s.llm_gateway_label
+
     report = run_benchmark(
         [
             (BASELINE, DeterministicBaselineProvider),
             ("gemini", gemini_adapter),
+            (gateway_label, gateway_adapter),
         ],
         cases,
         COPYWRITER_JSON_SCHEMA,

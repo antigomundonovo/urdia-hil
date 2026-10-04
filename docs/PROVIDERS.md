@@ -19,6 +19,22 @@
 | Fallback | `FailingProvider` → handler falha fechado (`RetryableJobError`); sem provider alternativo de LLM registrado |
 | Segurança | Chave só em Settings (`.env`, nunca versionada/logada/repr); saída do modelo é untrusted data e passa por schema + semantic gate (Doc 05/17 §10) |
 
+## LLM — `gateway-omniroute` (CANDIDATO — aguarda aprovação humana p/ produção)
+
+| Campo | Valor |
+|---|---|
+| Provider key | `openai-compat` com label `gateway-omniroute` (`packages/providers/openai_compat.py`) |
+| Model | `auto/gemini` via OmniRoute local (`http://localhost:20128/v1`, roteamento sobre as contas do dono) |
+| Version/API | OpenAI-compatible `/v1/chat/completions`, `response_format: json_schema` (strict) |
+| Capacidade | `llm.generate` (JSON estruturado; campos extras bloqueados pelo schema + gate) |
+| Registrado em | 2026-10-04 (CANDIDATO — benchmark concluído, aprovação pendente) |
+| Motivo | Contornar o 429/503 persistente do free tier do Google AI Studio usando o gateway já instalado pelo dono |
+| Benchmark | **APROVADO 2026-10-04**: 7/7 casos ao vivo, 100% dos gates determinísticos (schema + semantic + anti-slop + originalidade), latência média 12,9s (artifacts/llm-benchmark-20261004-193716.json). Comparação: `gemini` direto ficou em 2/7 no mesmo dia por 429 do free tier |
+| Regression | `tests/test_openai_compat.py` (8 testes mockados) + `tests/test_llm_bench.py`; gate semântico de produção intacto |
+| Fallback | `FailingProvider` → handler falha fechado; gateway depende do PC do dono estar ligado com o OmniRoute rodando |
+| Segurança | Chave do gateway só em Settings/`.env` (nunca versionada/logada/repr); saída do modelo é untrusted data e passa por schema + semantic gate |
+| Observações | Custo NÃO confirmado (as contas por trás do gateway variam — reportado como `None`). Rodar o OmniRoute localmente só funciona na máquina do dono: CI (GitHub Actions) mantém o baseline determinístico. Para produção, requer decisão do dono (Doc 17 §9, automation_level 2) |
+
 ## Regras de troca (checklist)
 
 1. Benchmark do novo provider vs atual (qualidade + custo + latência).

@@ -51,6 +51,14 @@ class Settings(BaseSettings):
     llm_model: str = "gemini-3.8-flash"
     llm_timeout_seconds: float = 60.0
 
+    # Gateway OpenAI-compatível (CANDIDATO §9; ex.: OmniRoute local).
+    # Ainda NÃO é provider de produção — troca exige benchmark + regression
+    # + aprovação humana (Doc 17 §9).
+    llm_gateway_base_url: str = ""
+    llm_gateway_api_key: str = Field(default="", repr=False)
+    llm_gateway_model: str = "auto/gemini"
+    llm_gateway_label: str = "gateway-omniroute"
+
     # YouTube adapter (AMENDMENT-012): YouTube requires a session for
     # metadata; cookies come from the operator's own browser (optional).
     yt_dlp_cookies_from_browser: str | None = None
