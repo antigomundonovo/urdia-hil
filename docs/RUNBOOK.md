@@ -10,11 +10,12 @@ docker compose up -d postgres
 .venv/Scripts/python -m alembic upgrade head
 .venv/Scripts/python -m scripts.seed
 
-# 3. API (terminal 1)
-.venv/Scripts/python -m uvicorn apps.api.main:app --host 127.0.0.1 --port 8000
+# 3. API (terminal 1) — se a 8000 estiver OCUPADA (o backend do Studio em
+# C:\Antigomundonovo também usa 8000!), troque a porta e passe a mesma ao web:
+.venv/Scripts/python -m uvicorn apps.api.main:app --host 127.0.0.1 --port 8010
 
 # 4. Interface (terminal 2)
-cd apps/web && npm run dev   # → http://localhost:5173
+cd apps/web && VITE_API_URL=http://localhost:8010 npm run dev   # → http://localhost:5173
 
 # 5. Worker residente (terminal 3, opcional — processa jobs do radar)
 .venv/Scripts/python -m apps.worker

@@ -11,6 +11,7 @@ import Sources from "./pages/Sources";
 import Analytics from "./pages/Analytics";
 import Learning from "./pages/Learning";
 import Jobs from "./pages/Jobs";
+import Social from "./pages/Social";
 
 const NAV = [
   { to: "/", label: "Painel" },
@@ -19,6 +20,7 @@ const NAV = [
   { to: "/jobs", label: "Jobs" },
   { to: "/analytics", label: "Analytics" },
   { to: "/learning", label: "Learning" },
+  { to: "/social", label: "Social" },
 ];
 
 export default function App() {
@@ -114,6 +116,7 @@ export default function App() {
           <Route path="/jobs" element={<Jobs />} />
           <Route path="/analytics" element={<Analytics />} />
           <Route path="/learning" element={<Learning />} />
+          <Route path="/social" element={<Social />} />
         </Routes>
       </main>
       <footer className="border-t border-stone-200 py-6 text-center text-xs text-stone-400">
