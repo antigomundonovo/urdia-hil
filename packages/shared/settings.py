@@ -60,6 +60,12 @@ class Settings(BaseSettings):
     llm_gateway_model: str = "auto/gemini"
     llm_gateway_label: str = "gateway-omniroute"
 
+    # Asset host público (contrato §6 — Supabase Storage p/ publicação
+    # Instagram e2e). Service key nunca repr'd/logada (Doc 08).
+    supabase_url: str = ""
+    supabase_service_key: str = Field(default="", repr=False)
+    supabase_bucket: str = "urdia-assets"
+
     # YouTube adapter (AMENDMENT-012): YouTube requires a session for
     # metadata; cookies come from the operator's own browser (optional).
     yt_dlp_cookies_from_browser: str | None = None

@@ -8,6 +8,7 @@ All workspace-scoped; server-side authorization revalidated (Doc 08).
 """
 
 from datetime import UTC, datetime
+from pathlib import Path
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -444,6 +445,49 @@ def confirm_publication(
     return {"id": str(pub.id), "status": pub.status, "published_at": pub.published_at.isoformat()}
 
 
+def _auto_hosted_image_urls(package_id: UUID) -> list[str]:
+    """Sobe as imagens do kit de exportação para o Supabase (se configurado)
+    e devolve as URLs públicas. Sem Supabase configurado → lista vazia (o
+    publish falha depois com a mensagem padrão de image_urls obrigatórias).
+    Bucket é criado idempotentemente na primeira publicação."""
+    from packages.shared.settings import get_settings
+
+    settings = get_settings()
+    if not settings.supabase_url or not settings.supabase_service_key:
+        return []
+    from packages.providers.supabase_storage import (
+        SupabaseAssetHost,
+        SupabaseError,
+        SupabaseUnavailable,
+        find_export_kit_images,
+    )
+
+    host = SupabaseAssetHost(
+        url=settings.supabase_url,
+        service_key=settings.supabase_service_key,
+        bucket=settings.supabase_bucket,
+    )
+    images = find_export_kit_images(Path(settings.export_root), str(package_id))
+    if not images:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "no public URLs informed and no exported images found for this "
+                "package (export first)"
+            ),
+        )
+    try:
+        host.ensure_bucket()
+        return [
+            host.upload_file(img, remote_path=f"{package_id}/{img.name}")
+            for img in images
+        ]
+    except SupabaseUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except SupabaseError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
 class PublishBody(BaseModel):
     profile_id: UUID
     public_image_urls: list[str] = Field(default_factory=list)
@@ -577,10 +621,16 @@ def publish_via_api(
     caption = body.caption_override or (
         f"{draft.title}\n\n{draft.caption}" if draft.title else (draft.caption or "")
     )
+    image_urls = body.public_image_urls
+    if not image_urls:
+        # Asset host público (contrato §6): sem URLs informadas, sobe o kit
+        # de exportação para o bucket público e usa as URLs geradas.
+        image_urls = _auto_hosted_image_urls(package.id)
+
     payload = {
         "format": package.format if package.format in ("PHOTO_POST", "CAROUSEL") else "PHOTO_POST",
         "caption": caption,
-        "image_urls": body.public_image_urls,
+        "image_urls": image_urls,
     }
 
     from packages.providers.instagram import (
