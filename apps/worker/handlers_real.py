@@ -32,8 +32,34 @@ def _settings():
 # ---------------------------------------------------------------------------
 # IMAGE_ANALYSIS
 # ---------------------------------------------------------------------------
+def _llm_text_provider():
+    """Doc 17 §9 provider selection for TEXT capabilities (copywriter,
+    adversarial). Swap to the OpenAI-compat gateway was benchmarked 7/7 and
+    approved by the owner on 2026-10-04; falls back to Gemini when the
+    gateway is not configured (CI / fresh clone) — both fail closed when
+    unavailable (transient → RetryableJobError)."""
+    s = _settings()
+    if (
+        s.llm_provider == "gateway"
+        and s.llm_gateway_base_url
+        and s.llm_gateway_api_key
+    ):
+        from packages.providers.openai_compat import OpenAICompatProvider
+
+        return OpenAICompatProvider(
+            base_url=s.llm_gateway_base_url,
+            api_key=s.llm_gateway_api_key,
+            model=s.llm_gateway_model,
+            provider_label=s.llm_gateway_label,
+        )
+    from packages.providers.gemini import GeminiProvider
+
+    return GeminiProvider()
+
+
 def _vision_provider():
-    """Factory kept separate so tests can inject a fake provider."""
+    """Factory kept separate so tests can inject a fake provider.
+    Vision stays on Gemini — the gateway adapter is text-only (Doc 17 §9)."""
     from packages.providers.gemini import GeminiProvider
 
     return GeminiProvider()
@@ -554,9 +580,7 @@ LEARNING_ANALYSIS = learning_analysis
 # ---------------------------------------------------------------------------
 def _copywriter_provider():
     """Factory kept separate so tests can inject a fake provider."""
-    from packages.providers.gemini import GeminiProvider
-
-    return GeminiProvider()
+    return _llm_text_provider()
 
 
 def content_generation(
@@ -644,9 +668,7 @@ CONTENT_GENERATION = content_generation
 # ---------------------------------------------------------------------------
 def _adversarial_provider():
     """Factory kept separate so tests can inject a fake provider."""
-    from packages.providers.gemini import GeminiProvider
-
-    return GeminiProvider()
+    return _llm_text_provider()
 
 
 def adversarial_research(

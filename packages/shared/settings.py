@@ -51,9 +51,10 @@ class Settings(BaseSettings):
     llm_model: str = "gemini-3.8-flash"
     llm_timeout_seconds: float = 60.0
 
-    # Gateway OpenAI-compatível (CANDIDATO §9; ex.: OmniRoute local).
-    # Ainda NÃO é provider de produção — troca exige benchmark + regression
-    # + aprovação humana (Doc 17 §9).
+    # Gateway OpenAI-compatível — provider de PRODUÇÃO para capacidades de
+    # TEXTO desde 2026-10-04 (benchmark 7/7 + aprovação humana do dono,
+    # Doc 17 §9). Valores: "gateway" | "gemini". Vision permanece no gemini.
+    llm_provider: str = "gateway"
     llm_gateway_base_url: str = ""
     llm_gateway_api_key: str = Field(default="", repr=False)
     llm_gateway_model: str = "auto/gemini"
