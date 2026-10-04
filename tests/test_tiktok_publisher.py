@@ -94,12 +94,12 @@ def test_publish_file_upload_queries_creator_and_uploads_chunks(monkeypatch, tmp
     assert post_calls[0][0].endswith("creator_info/query/")
     init = post_calls[1][1]
     assert init["source_info"]["source"] == "FILE_UPLOAD"
-    assert init["source_info"]["total_chunk_count"] == 2
+    # sandbox validated pattern: single chunk sized exactly like the video
+    assert init["source_info"]["chunk_size"] == init["source_info"]["video_size"]
+    assert init["source_info"]["total_chunk_count"] == 1
     assert init["post_info"]["is_aigc"] is True
-    assert len(put_calls) == 2
-    assert put_calls[0][1]["Content-Range"] == "bytes 0-10485759/10485883"
-    assert put_calls[1][1]["Content-Range"] == "bytes 10485760-10485882/10485883"
-    assert put_calls[1][2] == 123
+    assert len(put_calls) == 1  # single-chunk upload (sandbox validated pattern)
+    assert put_calls[0][1]["Content-Range"] == "bytes 0-10485882/10485883"
 
 
 def test_publish_url_uses_pull_from_url(monkeypatch):

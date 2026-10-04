@@ -169,11 +169,13 @@ class TikTokPublisher:
         }
 
     def _chunk_size(self, size: int) -> int:
-        if size <= 0:
-            raise TikTokPublishError("video file is empty")
-        if size < MIN_CHUNK_SIZE:
+        """Sandbox/Content API validated pattern: a SINGLE chunk of the
+        exact video size (multi-chunk inits are rejected as invalid; chunk
+        larger than the file is rejected too). Files above the 64MB cap
+        fall back to equal MAX chunks."""
+        if size <= MAX_CHUNK_SIZE:
             return size
-        return min(DEFAULT_CHUNK_SIZE, MAX_CHUNK_SIZE)
+        return MAX_CHUNK_SIZE
 
     def _upload_file(self, upload_url: str, path: Path, total_size: int, chunk_size: int) -> None:
         start = 0
