@@ -9,13 +9,13 @@
 | Campo | Valor |
 |---|---|
 | Provider key | `gemini` (`packages/providers/gemini.py`) |
-| Model | `gemini-2.5-flash` (configurável via `LLM_MODEL`) |
+| Model | `gemini-3.8-flash` (configurável via `LLM_MODEL`). **2026-10-04**: `gemini-2.5-flash` foi descontinuado pela API para chaves novas (HTTP 404 com mensagem oficial) — migração forçada, não escolha; validado ao vivo com a chave do projeto |
 | Version/API | `generativelanguage.googleapis.com/v1beta`, `generateContent` |
 | Capacidade | `llm.generate` (texto estruturado com `responseSchema`) |
-| Registrado em | 2026-10-01 |
+| Registrado em | 2026-10-01 (model migrado em 2026-10-04) |
 | Motivo | Primeiro provider LLM: desbloqueia Copywriter (Doc 05) e o handler `CONTENT_GENERATION`; chave fornecida pelo dono do projeto |
-| Benchmark | **Pendente** — primeiro provider, sem concorrente para comparar; benchmark obligatório antes de qualquer troca |
-| Regression | Suíte `tests/test_gemini_provider.py` (mockada) + gate semântico `tests/test_copywriter_agent.py` |
+| Benchmark | **Harness entregue 2026-10-04** (`packages/providers/llm_bench.py` + `python -m scripts.benchmark_llm`): casos do dataset canônico, gates determinísticos de produção (schema + semantic gate + anti-slop + originalidade), latência/tokens/custo. Evidência: 2 casos ao vivo 100% dos gates (artifacts/llm-benchmark-20261004-184937.json); rodada completa pendente por **429/503 persistente do free tier** do 3.8-flash (re-tentar em janela de quota ou com tier pago). Preço do 3.8-flash: NÃO confirmado (custo reportado como `None` — nunca inventado) |
+| Regression | Suíte `tests/test_gemini_provider.py` (mockada) + gate semântico `tests/test_copywriter_agent.py` + `tests/test_llm_bench.py` (harness determinístico, baseline sempre-verde) |
 | Fallback | `FailingProvider` → handler falha fechado (`RetryableJobError`); sem provider alternativo de LLM registrado |
 | Segurança | Chave só em Settings (`.env`, nunca versionada/logada/repr); saída do modelo é untrusted data e passa por schema + semantic gate (Doc 05/17 §10) |
 

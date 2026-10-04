@@ -2,7 +2,7 @@
 
 Contract: same ProviderAdapter Protocol as every other provider; the registry
 decides, not the caller. Registered as `gemini` / model from settings
-(default gemini-2.5-flash) — see docs/PROVIDERS.md for the §15 registry entry
+(default gemini-3.8-flash) — see docs/PROVIDERS.md for the §15 registry entry
 (model, version, reason, benchmark status, fallback).
 
 Security (Doc 08/§12): the API key is read from Settings only, never logged,
@@ -150,6 +150,13 @@ class GeminiProvider:
             "model": self._model,
             "finish_reason": candidates[0].get("finishReason"),
         }
+        # Uso de tokens (Doc 17 §15 — benchmark de custo por provider).
+        usage = data.get("usageMetadata")
+        if usage:
+            result["usage"] = {
+                "input_tokens": int(usage.get("promptTokenCount", 0) or 0),
+                "output_tokens": int(usage.get("candidatesTokenCount", 0) or 0),
+            }
         if json_schema is not None:
             try:
                 result["json"] = json.loads(text)

@@ -46,7 +46,9 @@ class Settings(BaseSettings):
 
     # LLM provider (Doc 17 §9/§15): key never logged/repr'd (Doc 08).
     google_ai_api_key: str = Field(default="", repr=False)
-    llm_model: str = "gemini-2.5-flash"
+    # gemini-2.5-flash foi descontinuado para chaves novas (API, 2026-10);
+    # default segue o modelo atual recomendado pela própria API.
+    llm_model: str = "gemini-3.8-flash"
     llm_timeout_seconds: float = 60.0
 
     # YouTube adapter (AMENDMENT-012): YouTube requires a session for

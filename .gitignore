@@ -56,3 +56,7 @@ roster-backups/
 hive
 restore-gate.json
 worktrees/
+
+# Benchmark artifacts — só evidências nomeadas são versionadas
+artifacts/*
+!artifacts/llm-benchmark-20261004-184937.json
