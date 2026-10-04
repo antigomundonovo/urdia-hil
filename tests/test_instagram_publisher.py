@@ -85,11 +85,14 @@ def test_publish_photo_flow(monkeypatch):
 
     def fake_post(path, data):
         calls.append((path, dict(data)))
-        if path == "media":
+        if path in ("media", "me/media"):
             return {"id": "container-1"}
         return {"id": "ig-media-999"}
 
     monkeypatch.setattr(publisher, "_post", fake_post)
+    monkeypatch.setattr(
+        publisher, "_get", lambda cid, fields: {"status_code": "FINISHED"}
+    )
     monkeypatch.setattr(publisher, "_permalink", lambda rid: "https://instagram.com/p/xyz")
     result = publisher.publish(
         {
@@ -102,7 +105,7 @@ def test_publish_photo_flow(monkeypatch):
     assert result.remote_id == "ig-media-999"
     assert result.permalink == "https://instagram.com/p/xyz"
     # 2-step flow: container then publish
-    assert [p for p, _ in calls] == ["media", "media_publish"]
+    assert [p for p, _ in calls] == ["me/media", "me/media_publish"]
     assert calls[1][1]["creation_id"] == "container-1"
 
 
@@ -127,7 +130,7 @@ def test_publish_carousel_flow(monkeypatch):
     created: list[str] = []
 
     def fake_post(path, data):
-        if path == "media":
+        if path in ("media", "me/media"):
             if data.get("media_type") == "CAROUSEL":
                 return {"id": "carousel-container"}
             created.append(data["image_url"])
@@ -135,6 +138,9 @@ def test_publish_carousel_flow(monkeypatch):
         return {"id": "carousel-777"}
 
     monkeypatch.setattr(publisher, "_post", fake_post)
+    monkeypatch.setattr(
+        publisher, "_get", lambda cid, fields: {"status_code": "FINISHED"}
+    )
     result = publisher.publish(
         {
             "format": "CAROUSEL",

@@ -636,6 +636,7 @@ def publish_via_api(
     from packages.providers.instagram import (
         InstagramPublisher,
         InstagramPublishError,
+        InstagramPublishUnavailable,
     )
     from packages.shared.execution_context import ExecutionContext
 
@@ -644,6 +645,8 @@ def publish_via_api(
         result = publisher.publish(payload, idempotency_key=pub.idempotency_key or str(pub.id))
     except InstagramPublishError as err:
         raise HTTPException(status_code=409, detail=str(err)) from err
+    except InstagramPublishUnavailable as err:
+        raise HTTPException(status_code=503, detail=str(err)) from err
 
     pub.status = "PUBLISHED"
     pub.method = "API"

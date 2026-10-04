@@ -40,6 +40,11 @@ class PublishResult:
 
 
 class InstagramPublishError(Exception):
+    """Conteúdo/configuração inutilizável — falha fechada."""
+
+
+class InstagramPublishUnavailable(Exception):
+    """Transiente (rede/timeout) — o caller decide o retry (Doc 03)."""
     """Normalized failure (never exposes credentials/raw response)."""
 
 
@@ -231,10 +236,38 @@ class InstagramPublisher:
         return body
 
     def _create_container(self, data: dict[str, str]) -> str:
-        return self._post("media", data)["id"]
+        # /me/media — sem o objeto usuário a API interpreta "media" como
+        # ID de objeto e devolve "Object with ID 'media' does not exist".
+        return self._post("me/media", data)["id"]
+
+    def _wait_container_ready(self, creation_id: str, *, timeout_s: float = 60.0) -> None:
+        """Sonda status_code do container até FINISHED (a API rejeita
+        media_publish de container ainda processando: 'Media ID is not
+        available'). Falha fechada em ERROR; timeout é transiente."""
+        import time as _time
+
+        deadline = _time.monotonic() + timeout_s
+        while _time.monotonic() < deadline:
+            body = self._get(creation_id, "status_code")
+            status = str(body.get("status_code", ""))
+            if status == "FINISHED":
+                return
+            if status == "ERROR":
+                raise InstagramPublishError(
+                    "instagram: container processing failed (status ERROR)"
+                )
+            if status != "IN_PROGRESS":
+                raise InstagramPublishError(
+                    f"instagram: unexpected container status {status!r}"
+                )
+            _time.sleep(3.0)
+        raise InstagramPublishUnavailable(
+            "instagram: container still processing after timeout"
+        )
 
     def _publish_container(self, creation_id: str) -> str:
-        return self._post("media_publish", {"creation_id": creation_id})["id"]
+        self._wait_container_ready(creation_id)
+        return self._post("me/media_publish", {"creation_id": creation_id})["id"]
 
     def _permalink(self, remote_id: str) -> str | None:
         try:

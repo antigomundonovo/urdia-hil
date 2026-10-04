@@ -55,6 +55,14 @@ class SupabaseAssetHost:
         self._bucket = bucket
         self._timeout = timeout
 
+    def _headers(self, extra: dict[str, str] | None = None) -> dict[str, str]:
+        """Projetos novos usam chaves sb_secret_* que o Storage exige no
+        header `apikey`; os legados JWT funcionam nos dois formatos."""
+        headers = {"apikey": self._key, "Authorization": f"Bearer {self._key}"}
+        if extra:
+            headers.update(extra)
+        return headers
+
     def public_url(self, remote_path: str) -> str:
         return (
             f"{self._url}/storage/v1/object/public/{self._bucket}/{remote_path}"
@@ -65,7 +73,7 @@ class SupabaseAssetHost:
         try:
             response = httpx.get(
                 f"{self._url}/storage/v1/bucket/{self._bucket}",
-                headers={"Authorization": f"Bearer {self._key}"},
+                headers=self._headers(),
                 timeout=self._timeout,
             )
         except httpx.HTTPError as exc:
@@ -81,10 +89,12 @@ class SupabaseAssetHost:
             return
         if response.status_code in (429,) or response.status_code >= 500:
             raise SupabaseUnavailable(f"supabase: HTTP {response.status_code}")
-        if response.status_code == 404:
+        if self._is_missing_bucket(response):
+            # Particularidade da Storage API: bucket inexistente volta
+            # HTTP 400 com statusCode/code de "não encontrado" no corpo.
             create = httpx.post(
                 f"{self._url}/storage/v1/bucket",
-                headers={"Authorization": f"Bearer {self._key}"},
+                headers=self._headers(),
                 json={"name": self._bucket, "public": True},
                 timeout=self._timeout,
             )
@@ -99,6 +109,18 @@ class SupabaseAssetHost:
             )
         raise SupabaseError(f"supabase: HTTP {response.status_code}")
 
+    @staticmethod
+    def _is_missing_bucket(response: httpx.Response) -> bool:
+        if response.status_code == 404:
+            return True
+        if response.status_code != 400:
+            return False
+        try:
+            body = response.json()
+        except ValueError:
+            return False
+        return body.get("code") == "NoSuchBucket" or body.get("statusCode") == 404
+
     def upload_file(self, local_path: Path, remote_path: str | None = None) -> str:
         """Sobe um arquivo e devolve a URL pública. Idempotente por
         remote_path (mesmo caminho = mesmo objeto sobrescrito)."""
@@ -111,11 +133,9 @@ class SupabaseAssetHost:
         try:
             response = httpx.post(
                 f"{self._url}/storage/v1/object/{self._bucket}/{remote}",
-                headers={
-                    "Authorization": f"Bearer {self._key}",
-                    "Content-Type": mime,
-                    "x-upsert": "true",
-                },
+                headers=self._headers(
+                    {"Content-Type": mime, "x-upsert": "true"}
+                ),
                 content=path.read_bytes(),
                 timeout=self._timeout,
             )
@@ -143,7 +163,8 @@ class SupabaseAssetHost:
 
 def find_export_kit_images(export_root: Path, package_id: str) -> list[Path]:
     """Imagens publicáveis do kit de exportação de um pacote
-    (`post-*-{short8}/image/*`), na ordem determinística do nome."""
+    (`post-*-{short8}/image/*`). O RENDER final (`render-*`) é a peça
+    publicável — se existir, só ele vai; sem render, os assets brutos."""
     short_id = str(package_id)[:8]
     if not export_root.is_dir():
         return []
@@ -153,7 +174,9 @@ def find_export_kit_images(export_root: Path, package_id: str) -> list[Path]:
     image_dir = kits[-1] / "image"
     if not image_dir.is_dir():
         return []
-    return sorted(
+    images = sorted(
         p for p in image_dir.iterdir()
         if p.suffix.lower() in MIME_BY_SUFFIX and p.is_file()
     )
+    renders = [p for p in images if p.name.startswith("render-")]
+    return renders or images

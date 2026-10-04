@@ -12,7 +12,7 @@
 
 | Plataforma | Método-alvo | API oficial de publicação | Bloqueio atual |
 |---|---|---|---|
-| Instagram | **API — ADAPTER ATIVO** 🟢 | ✅ graph.instagram.com (photo/carousel) | credenciais OK (URDIA-Media - IG); publicação exige imagem em **URL pública** |
+| Instagram | **API — E2E VALIDADO** ✅ 2026-10-04 | ✅ graph.instagram.com (photo/carousel) | post real publicado (asset host Supabase + me/media + polling de container) |
 | Facebook | **API** | ✅ Graph API (páginas) | credenciais (app Meta + permissões de página) |
 | X (Twitter) | **API** | ✅ API v2 (pay-per-use) | conta de dev + créditos (~US$ 0,015/post; US$ 0,20 com link) |
 | Threads | **API** | ✅ Threads API (2 passos) | credenciais (app Threads OAuth) |

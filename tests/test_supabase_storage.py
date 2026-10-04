@@ -49,6 +49,23 @@ def test_ensure_bucket_creates_when_missing(monkeypatch):
     calls = []
 
     def fake_get(url, headers=None, timeout=None):
+        # Particularidade real da Storage API: 400 + NoSuchBucket no corpo.
+        return _response(400, {"statusCode": "404", "code": "NoSuchBucket"})
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        calls.append(json)
+        return _response(201)
+
+    monkeypatch.setattr(mod.httpx, "get", fake_get)
+    monkeypatch.setattr(mod.httpx, "post", fake_post)
+    _host().ensure_bucket()
+    assert calls == [{"name": "urdia-assets", "public": True}]
+
+
+def test_ensure_bucket_also_handles_plain_404(monkeypatch):
+    calls = []
+
+    def fake_get(url, headers=None, timeout=None):
         return _response(404)
 
     def fake_post(url, headers=None, json=None, timeout=None):
@@ -109,3 +126,12 @@ def test_find_export_kit_images(tmp_path):
     images = find_export_kit_images(tmp_path, "2f4e8c48-0000-0000-0000-000000000000")
     assert [i.name for i in images] == ["a.jpg", "c.png"]
     assert find_export_kit_images(tmp_path, "sem-kit") == []
+
+
+def test_find_export_kit_prefers_render(tmp_path):
+    kit = tmp_path / "post-2026-10-04-2f4e8c48"
+    (kit / "image").mkdir(parents=True)
+    (kit / "image" / "asset.jpg").write_bytes(b"x")
+    (kit / "image" / "render-photo-post.png").write_bytes(b"x")
+    images = find_export_kit_images(tmp_path, "2f4e8c48-0000-0000-0000-000000000000")
+    assert [i.name for i in images] == ["render-photo-post.png"]
