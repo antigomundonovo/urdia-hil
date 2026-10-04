@@ -169,6 +169,8 @@ export default function Social() {
       </p>
       {message && <p className="text-sm text-stone-600">{message}</p>}
 
+      <TikTokCard card={card} />
+
       <section className={card}>
         <div className="flex items-center justify-between gap-4">
           <h3 className="text-sm font-semibold uppercase tracking-wide text-stone-500">
@@ -441,5 +443,139 @@ function ChallengeRow({
         </div>
       )}
     </li>
+  );
+}
+
+interface TikTokConnection {
+  connected: boolean;
+}
+
+const TIKTOK_DEMO_PUBLICATION = "e7931f28-1fc6-411b-94e4-9f2daa914426";
+const TIKTOK_DEMO_VIDEO = "assets/sandbox-test.mp4";
+
+function TikTokCard({ card }: { card: string }) {
+  const { profile, workspaceId } = useProfile();
+  const queryClient = useQueryClient();
+  const [code, setCode] = useState("");
+  const [tiktokMessage, setTiktokMessage] = useState<string | null>(null);
+
+  const connection = useQuery({
+    queryKey: ["tiktok-connection"],
+    queryFn: () => api.get<TikTokConnection>("/api/v1/social/tiktok/connection"),
+  });
+
+  const authorize = useMutation({
+    mutationFn: () =>
+      api.get<{ authorize_url: string }>("/api/v1/social/tiktok/authorize"),
+    onSuccess: (d) => {
+      window.open(d.authorize_url, "_blank", "noopener");
+      setTiktokMessage(
+        "1/3: autorize na janela que abriu, copie a URL que aparecer e cole no campo abaixo."
+      );
+    },
+    onError: (e) => setTiktokMessage((e as Error).message),
+  });
+
+  const connect = useMutation({
+    mutationFn: () => {
+      const raw = code.trim();
+      const match = raw.match(/[?&]code=([^&\s]+)/);
+      const extracted = match ? decodeURIComponent(match[1]) : raw;
+      return api.post("/api/v1/social/tiktok/exchange", { code: extracted });
+    },
+    onSuccess: () => {
+      setCode("");
+      setTiktokMessage("2/3: TikTok conectado! Agora publique o vídeo de teste.");
+      queryClient.invalidateQueries({ queryKey: ["tiktok-connection"] });
+    },
+    onError: (e) => setTiktokMessage((e as Error).message),
+  });
+
+  const publish = useMutation({
+    mutationFn: () =>
+      api.post(
+        `/api/v1/publications/${TIKTOK_DEMO_PUBLICATION}/publish?workspace_id=${workspaceId}`,
+        {
+          profile_id: profile?.id,
+          privacy_level: "SELF_ONLY",
+          local_video_path: TIKTOK_DEMO_VIDEO,
+        }
+      ),
+    onSuccess: () => {
+      setTiktokMessage(
+        "Publicação enviada! Clique em \"Verificar status\" em alguns segundos."
+      );
+    },
+    onError: (e) => setTiktokMessage((e as Error).message),
+  });
+
+  const status = useMutation({
+    mutationFn: () =>
+      api.post<{ status: string; platform_status?: string }>(
+        `/api/v1/publications/${TIKTOK_DEMO_PUBLICATION}/status?workspace_id=${workspaceId}`
+      ),
+    onSuccess: (d) => {
+      if (d.status === "PUBLISHED") {
+        setTiktokMessage("✅ PUBLISHED — o vídeo está no TikTok (visível só para você).");
+      } else {
+        setTiktokMessage(`Status: ${d.status}${d.platform_status ? ` (${d.platform_status})` : ""} — espere alguns segundos e verifique de novo.`);
+      }
+    },
+    onError: (e) => setTiktokMessage((e as Error).message),
+  });
+
+  const busy = authorize.isPending || connect.isPending || publish.isPending || status.isPending;
+
+  return (
+    <section className={`${card} border-amber-300 bg-amber-50`}>
+      <h3 className="text-sm font-semibold uppercase tracking-wide text-amber-900">
+        TikTok · conexão e publicação de teste
+      </h3>
+      <ol className="mt-2 list-decimal space-y-1 pl-5 text-xs text-stone-600">
+        <li>Clique em <strong>Conectar TikTok</strong>, autorize na janela que abrir.</li>
+        <li>Copie a URL da tela final e cole no campo abaixo; clique em <strong>Conectar</strong>.</li>
+        <li>Clique em <strong>Publicar vídeo de teste</strong> e depois em <strong>Verificar status</strong>.</li>
+      </ol>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <span className="text-xs text-stone-500">
+          {connection.data?.connected ? "Conectado ✅" : "Não conectado"}
+        </span>
+        <button
+          onClick={() => authorize.mutate()}
+          disabled={busy}
+          className="rounded bg-stone-900 px-4 py-2 text-sm font-medium text-white hover:bg-stone-700 disabled:opacity-40"
+        >
+          1. Conectar TikTok
+        </button>
+        <input
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
+          placeholder="cole aqui a URL (ou só o código) do TikTok"
+          className="w-72 rounded border border-stone-300 px-3 py-2 text-sm"
+        />
+        <button
+          onClick={() => connect.mutate()}
+          disabled={busy || !code.trim()}
+          className="rounded bg-stone-900 px-4 py-2 text-sm font-medium text-white hover:bg-stone-700 disabled:opacity-40"
+        >
+          2. Conectar
+        </button>
+        <button
+          onClick={() => publish.mutate()}
+          disabled={busy}
+          className="rounded bg-pink-600 px-4 py-2 text-sm font-medium text-white hover:bg-pink-700 disabled:opacity-40"
+        >
+          3. Publicar vídeo de teste (só eu)
+        </button>
+        <button
+          onClick={() => status.mutate()}
+          disabled={busy}
+          className="rounded border border-stone-400 px-4 py-2 text-sm font-medium hover:bg-white disabled:opacity-40"
+        >
+          4. Verificar status
+        </button>
+      </div>
+      {tiktokMessage && <p className="mt-3 text-sm text-stone-700">{tiktokMessage}</p>}
+    </section>
   );
 }
