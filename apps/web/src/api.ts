@@ -112,6 +112,7 @@ export const api = {
   get: <T,>(path: string) => request<T>(path),
   post: <T,>(path: string, body?: unknown) =>
     request<T>(path, { method: "POST", body: body ? JSON.stringify(body) : undefined }),
+  del: <T,>(path: string) => request<T>(path, { method: "DELETE" }),
   download: async (path: string, filename: string) => {
     const response = await fetch(`${API_URL}${path}`, { credentials: "include" });
     if (!response.ok) {

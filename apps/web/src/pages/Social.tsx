@@ -171,6 +171,8 @@ export default function Social() {
 
       <TikTokCard card={card} />
 
+      <BridgeCard card={card} />
+
       <section className={card}>
         <div className="flex items-center justify-between gap-4">
           <h3 className="text-sm font-semibold uppercase tracking-wide text-stone-500">
@@ -576,6 +578,120 @@ function TikTokCard({ card }: { card: string }) {
         </button>
       </div>
       {tiktokMessage && <p className="mt-3 text-sm text-stone-700">{tiktokMessage}</p>}
+    </section>
+  );
+}
+
+interface BridgeClient {
+  id: string;
+  name: string;
+  revoked: boolean;
+  last_used_at: string | null;
+  created_at: string | null;
+}
+
+function BridgeCard({ card }: { card: string }) {
+  const { workspaceId } = useProfile();
+  const queryClient = useQueryClient();
+  const [newKey, setNewKey] = useState<string | null>(null);
+  const [bridgeMessage, setBridgeMessage] = useState<string | null>(null);
+
+  const clients = useQuery({
+    queryKey: ["bridge-clients"],
+    queryFn: () =>
+      api.get<BridgeClient[]>(
+        `/api/v1/bridge/clients?workspace_id=${workspaceId}`
+      ),
+    enabled: !!workspaceId,
+  });
+
+  const create = useMutation({
+    mutationFn: (name: string) =>
+      api.post<{ api_key: string }>("/api/v1/bridge/clients", {
+        workspace_id: workspaceId,
+        name,
+      }),
+    onSuccess: (d) => {
+      setNewKey(d.api_key);
+      setBridgeMessage(
+        "Chave criada! Copie agora — ela NUNCA mais será exibida."
+      );
+      queryClient.invalidateQueries({ queryKey: ["bridge-clients"] });
+    },
+    onError: (e) => setBridgeMessage((e as Error).message),
+  });
+
+  const revoke = useMutation({
+    mutationFn: (id: string) =>
+      api.del(
+        `/api/v1/bridge/clients/${id}?workspace_id=${workspaceId}`
+      ),
+    onSuccess: () => {
+      setBridgeMessage("Chave revogada — o Studio perde o acesso na hora.");
+      queryClient.invalidateQueries({ queryKey: ["bridge-clients"] });
+    },
+    onError: (e) => setBridgeMessage((e as Error).message),
+  });
+
+  const active = clients.data?.filter((c) => !c.revoked) ?? [];
+
+  return (
+    <section className={card}>
+      <h3 className="text-sm font-semibold uppercase tracking-wide text-stone-500">
+        Ponte Studio · chaves de acesso de máquina
+      </h3>
+      <p className="mt-2 text-xs text-stone-600">
+        Permite ao URDIA Studio <strong>somente ler</strong> a demanda da
+        audiência (nada publica, nada apaga). Crie uma chave, entregue ao
+        Studio, e revogue se desconfiar de qualquer coisa.
+      </p>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <button
+          onClick={() => create.mutate("URDIA Studio")}
+          disabled={create.isPending || !workspaceId}
+          className="rounded bg-stone-900 px-4 py-2 text-sm font-medium text-white hover:bg-stone-700 disabled:opacity-40"
+        >
+          1. Criar chave de acesso
+        </button>
+      </div>
+      {newKey && (
+        <div className="mt-3 rounded border border-amber-300 bg-amber-50 p-3">
+          <p className="text-xs font-medium text-amber-900">
+            Copie a chave agora (não será mostrada de novo):
+          </p>
+          <code className="mt-1 block break-all text-sm">{newKey}</code>
+        </div>
+      )}
+      <div className="mt-4 space-y-2">
+        {active.length === 0 && (
+          <p className="text-xs text-stone-500">Nenhuma chave ativa.</p>
+        )}
+        {active.map((c) => (
+          <div
+            key={c.id}
+            className="flex flex-wrap items-center justify-between gap-2 rounded border border-stone-200 px-3 py-2"
+          >
+            <div className="text-xs">
+              <span className="font-medium">{c.name}</span>
+              <span className="ml-2 text-stone-500">
+                {c.last_used_at
+                  ? `usada em ${new Date(c.last_used_at).toLocaleString("pt-BR")}`
+                  : "nunca usada"}
+              </span>
+            </div>
+            <button
+              onClick={() => revoke.mutate(c.id)}
+              disabled={revoke.isPending}
+              className="rounded border border-red-300 px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-40"
+            >
+              Revogar
+            </button>
+          </div>
+        ))}
+      </div>
+      {bridgeMessage && (
+        <p className="mt-3 text-sm text-stone-700">{bridgeMessage}</p>
+      )}
     </section>
   );
 }
