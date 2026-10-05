@@ -1,13 +1,31 @@
 import { useQuery } from "@tanstack/react-query";
-import { api, Profile } from "./api";
+import { api, AuthContext, Profile } from "./api";
 
-/** V1: single-workspace, first profile (ANM seeded). Profile switching
- * arrives with profile management. */
-export function useProfile(): { profile?: Profile; workspaceId?: string } {
-  const { data } = useQuery({
-    queryKey: ["profiles"],
-    queryFn: () => api.get<{ profiles: Profile[] }>("/api/v1/profiles"),
+/** Initial account experience uses its first authorized workspace/profile. */
+export function useProfile(): {
+  profile?: Profile;
+  workspaceId?: string;
+  userEmail?: string;
+  isPending: boolean;
+  error: Error | null;
+  refetch: () => void;
+} {
+  const { data, isPending, error, refetch } = useQuery({
+    queryKey: ["auth"],
+    queryFn: () => api.get<AuthContext>("/api/v1/auth/me"),
+    retry: false,
+    refetchInterval: 60_000,
   });
-  const profile = data?.profiles[0];
-  return { profile, workspaceId: profile?.workspace_id };
+  const workspace = data?.workspaces[0];
+  const profile = workspace?.profile
+    ? { ...workspace.profile, workspace_id: workspace.id }
+    : undefined;
+  return {
+    profile,
+    workspaceId: workspace?.id,
+    userEmail: data?.user.email,
+    isPending,
+    error: error as Error | null,
+    refetch: () => void refetch(),
+  };
 }

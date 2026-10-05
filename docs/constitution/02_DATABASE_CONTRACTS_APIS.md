@@ -46,6 +46,10 @@ POST /api/v1/opportunities/{id}/quarantine
 POST /api/v1/opportunities/{id}/reject
 ```
 
+`GET /api/v1/opportunities/{id}` returns attached claim IDs, editorial wording
+and verification status for the opportunity's workspace so the editor can
+record which claims the draft actually uses.
+
 ### Content
 ```http
 POST /api/v1/opportunities/{id}/create-content
@@ -55,7 +59,18 @@ POST /api/v1/content/{id}/run-qc
 POST /api/v1/content/{id}/approve
 POST /api/v1/content/{id}/reject
 POST /api/v1/content/{id}/export
+GET  /api/v1/content/{id}
+GET  /api/v1/content/{id}/export/download
 ```
+
+`GET /api/v1/content/{id}` retorna o pacote canônico, rascunhos e variantes
+vinculadas, além do resultado QC mais recente identificado como atual ou
+desatualizado. A resposta é escopada pelo workspace e permite retomar o editor
+após recarregar a página; aprovação/exportação ainda revalidam os gates no
+servidor.
+
+O download entrega um ZIP temporário com a pasta de exportação; credenciais
+de workspace/profile continuam obrigatórias e o backend revalida os gates.
 
 ### Publication
 ```http

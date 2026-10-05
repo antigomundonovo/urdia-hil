@@ -5,11 +5,13 @@ import uuid
 import pytest
 
 from packages.domain.assets import Asset
+from packages.domain.editorial import OpportunityClaim, OpportunitySource
 from packages.domain.enums import (
     JEVDecision,
     OpportunityState,
     RightsClassification,
 )
+from packages.domain.knowledge import Story
 from packages.domain.models import Profile, Source, Workspace
 from packages.research.opportunity import OpportunityService
 from packages.research.rights import RightsService
@@ -168,3 +170,64 @@ def test_opportunity_isolation_scoped_fetch(db, world):
     assert opps.get_scoped(opp.id, uuid.uuid4()) is None
     assert opps.list_for_profile(ws.id, profile.id)
     assert not opps.list_for_profile(ws.id, uuid.uuid4())
+
+
+def test_opportunity_rejects_references_from_another_profile(db, world):
+    ws, profile, opps, knowledge, _ = world
+    ctx = _ctx(ws, profile)
+    opp = opps.create(ctx, title="Scoped opportunity")
+    other_profile = Profile(workspace_id=ws.id, key="foreign", name="Foreign")
+    db.add(other_profile)
+    db.flush()
+    foreign_ctx = _ctx(ws, other_profile)
+    foreign_claim = knowledge.add_claim(
+        foreign_ctx,
+        subject="Private",
+        predicate="is",
+        object="foreign",
+    )
+    foreign_source = Source(
+        workspace_id=ws.id,
+        profile_id=other_profile.id,
+        url="https://foreign.test/source",
+        source_type="rss",
+    )
+    foreign_asset = Asset(
+        workspace_id=ws.id,
+        profile_id=other_profile.id,
+        asset_type="PHOTO",
+        status="ACTIVE",
+    )
+    db.add_all([foreign_source, foreign_asset])
+    db.flush()
+
+    with pytest.raises(LookupError, match="claim not found"):
+        opps.attach(ctx, opp, claim_ids=[foreign_claim.id])
+    with pytest.raises(LookupError, match="source not found"):
+        opps.attach(ctx, opp, source_ids=[foreign_source.id])
+    with pytest.raises(LookupError, match="asset not found"):
+        opps.attach(ctx, opp, asset_ids=[foreign_asset.id])
+    with pytest.raises(LookupError, match="opportunity not found"):
+        opps.attach(foreign_ctx, opp, claim_ids=[])
+    with pytest.raises(LookupError, match="opportunity not found"):
+        opps.jev_recommend(foreign_ctx, opp)
+
+    assert db.query(OpportunityClaim).filter_by(opportunity_id=opp.id).count() == 0
+    assert db.query(OpportunitySource).filter_by(opportunity_id=opp.id).count() == 0
+
+
+def test_opportunity_rejects_story_from_another_profile(db, world):
+    ws, profile, opps, _, _ = world
+    other_profile = Profile(workspace_id=ws.id, key="story-profile", name="Other")
+    db.add(other_profile)
+    db.flush()
+    story = Story(
+        workspace_id=ws.id,
+        profile_id=other_profile.id,
+        title="Private story",
+    )
+    db.add(story)
+    db.flush()
+
+    with pytest.raises(LookupError, match="story not found"):
+        opps.create(_ctx(ws, profile), title="Invalid", story_id=story.id)

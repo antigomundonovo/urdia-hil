@@ -1,17 +1,18 @@
-# URDIA — HISTORY INTELLIGENCE LAYER
-## PRODUCT + ARCHITECTURE + EDITORIAL CONSTITUTION
+# URDIA-HIL — SOCIAL & AUDIENCE INTELLIGENCE
+## PRODUCT + ARCHITECTURE + GOVERNANCE CONSTITUTION
 
 **Versão:** 1.0  
-**Status:** BASELINE CONGELADA  
-**Produto inicial:** Antigo Mundo Novo  
+**Status:** BASELINE CONGELADA + EMENDA 013  
+**Papel:** Social/Audience Intelligence do ecossistema URDIA  
 **Controladora:** URDIA  
-**Ambiente:** Desktop-first / Windows / Local-first
+**Ambiente:** Desktop-first / Windows / Local-first  
+**Fronteira:** o HIL não é o pipeline de vídeo do URDIA Studio
 
 ---
 
 # 1. FUNDAÇÃO
 
-O HIL não é um gerador simples de posts. É um **Motor de Inteligência Editorial Histórica**.
+O HIL é a **camada de Social/Audience Intelligence do URDIA**. Ele processa sinais sociais e de audiência, preserva evidências e produz inteligência estruturada para decisão humana e integração contratual com o URDIA Studio.
 
 Pipeline:
 ```text
@@ -44,11 +45,19 @@ Nunca considerar LLM output como fato por si só.
 
 # 2. NORTH STAR
 
-> “Qual história merece ocupar um espaço no feed do Antigo Mundo Novo?”
+> “Transformar sinais da audiência em inteligência social rastreável, sem substituir a decisão humana nem assumir o pipeline de vídeo.”
 
 Não otimizar somente viralização. O sistema precisa ter capacidade explícita de `NÃO PUBLICAR`.
 
-# 3. PROFILE INICIAL — ANTIGO MUNDO NOVO
+# 3. PROFILE E IDENTIDADE
+
+O HIL é profile-aware e domain-neutral. Antigo Mundo Novo pode existir como um perfil específico/legado, mas nunca como identidade estrutural do HIL.
+
+A hierarquia é:
+
+```text
+URDIA → WORKSPACE → PROFILE → EDITORIAL IDENTITY / POLICIES → SOCIAL INTELLIGENCE
+```
 
 Tema: História, curiosidades, memória, cultura histórica e descobertas relacionadas ao passado e ao patrimônio humano.
 
@@ -71,6 +80,10 @@ unknown_rights_block_publication: true
 ```
 
 65/35 é prioridade de descoberta, não cota rígida de publicação.
+
+## OVERRIDE DE ESCOPO — EMENDA 013
+
+As seções históricas abaixo deste documento são preservadas para rastreabilidade da evolução do produto, mas **não definem o escopo ativo do HIL**. Para implementação atual, a **Emenda 013** e o documento CONTRATO_TECNOLOGICO_URDIA.md prevalecem: HIL é Social/Audience Intelligence; o URDIA Studio é o proprietário do pipeline de vídeo. Nenhum código novo deve tratar o perfil histórico legado como identidade estrutural do produto.
 
 # 4. ESCOPO
 

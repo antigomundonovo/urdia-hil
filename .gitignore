@@ -45,5 +45,19 @@ Thumbs.db
 .idea/
 .vscode/
 .pytest_tmp/
+.pytest_tmp_r/
 .pytest_tmp/
+.pytest_tmp_r/
 backups/
+
+# Ferramenta externa OpenCode (artefatos de operação — nunca versionar)
+roster.json
+roster-backups/
+hive
+restore-gate.json
+worktrees/
+
+# Benchmark artifacts — só evidências nomeadas são versionadas
+artifacts/*
+!artifacts/llm-benchmark-20261004-184937.json
+!artifacts/llm-benchmark-20261004-193716.json

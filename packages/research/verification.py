@@ -22,7 +22,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from packages.domain.enums import UncertaintyState
-from packages.domain.knowledge import Claim, Contradiction, EvidenceRecord, Verdict
+from packages.domain.knowledge import Claim, Contradiction, EvidenceRecord, Story, Verdict
+from packages.domain.models import Profile, Source
 from packages.governance.audit import append_audit
 from packages.shared.execution_context import ExecutionContext
 
@@ -48,16 +49,23 @@ class KnowledgeService:
 
     # --- reads (scoped) ---------------------------------------------------
 
-    def get_claim_scoped(self, claim_id, workspace_id) -> Claim | None:
-        claim = self.session.get(Claim, claim_id)
-        if claim is None or claim.workspace_id != workspace_id:
-            return None
-        return claim
+    def get_claim_scoped(self, claim_id, ctx: ExecutionContext) -> Claim | None:
+        return self.session.scalars(
+            select(Claim).where(
+                Claim.id == claim_id,
+                Claim.workspace_id == ctx.workspace_id,
+                Claim.profile_id == ctx.profile_id,
+            )
+        ).first()
 
-    def evidence_for(self, claim_id) -> list[EvidenceRecord]:
+    def evidence_for(self, claim: Claim) -> list[EvidenceRecord]:
         return list(
             self.session.scalars(
-                select(EvidenceRecord).where(EvidenceRecord.claim_id == claim_id)
+                select(EvidenceRecord).where(
+                    EvidenceRecord.claim_id == claim.id,
+                    EvidenceRecord.workspace_id == claim.workspace_id,
+                    EvidenceRecord.profile_id == claim.profile_id,
+                )
             )
         )
 
@@ -80,6 +88,24 @@ class KnowledgeService:
     ) -> Claim:
         if ctx.profile_id is None:
             raise ValueError("claim requires a profile context")
+        profile = self.session.scalars(
+            select(Profile).where(
+                Profile.id == ctx.profile_id,
+                Profile.workspace_id == ctx.workspace_id,
+            )
+        ).first()
+        if profile is None:
+            raise LookupError("profile not found in workspace")
+        if story_id is not None:
+            story = self.session.scalars(
+                select(Story).where(
+                    Story.id == story_id,
+                    Story.workspace_id == ctx.workspace_id,
+                    Story.profile_id == ctx.profile_id,
+                )
+            ).first()
+            if story is None:
+                raise LookupError("story not found in profile")
         claim = Claim(
             workspace_id=ctx.workspace_id,
             profile_id=ctx.profile_id,
@@ -122,9 +148,19 @@ class KnowledgeService:
         independence_group: str | None = None,
         strength: int | None = None,
     ) -> EvidenceRecord:
-        claim = self.get_claim_scoped(claim_id, ctx.workspace_id)
+        claim = self.get_claim_scoped(claim_id, ctx)
         if claim is None:
-            raise LookupError("claim not found in workspace")
+            raise LookupError("claim not found in profile")
+        if source_id is not None:
+            source = self.session.scalars(
+                select(Source).where(
+                    Source.id == source_id,
+                    Source.workspace_id == claim.workspace_id,
+                    Source.profile_id == claim.profile_id,
+                )
+            ).first()
+            if source is None:
+                raise LookupError("source not found in profile")
         record = EvidenceRecord(
             workspace_id=ctx.workspace_id,
             profile_id=claim.profile_id,
@@ -157,7 +193,9 @@ class KnowledgeService:
     # --- deterministic verification ---------------------------------------
 
     def verify_claim(self, ctx: ExecutionContext, claim: Claim) -> VerificationOutcome:
-        records = self.evidence_for(claim.id)
+        if claim.workspace_id != ctx.workspace_id or claim.profile_id != ctx.profile_id:
+            raise LookupError("claim not found in profile")
+        records = self.evidence_for(claim)
         supporting = [e for e in records if e.supports]
         contradicting = [e for e in records if not e.supports]
         support_groups = len({_independence_key(e) for e in supporting})
@@ -253,15 +291,28 @@ class KnowledgeService:
 
     # --- pipeline gate (Doc 16) --------------------------------------------
 
-    def claims_pipeline_ready(self, claim_ids: list) -> bool:
+    def claims_pipeline_ready(self, ctx: ExecutionContext, claim_ids: list) -> bool:
         """Doc 16: claim without evidence → NOT_READY. A claim is ready only
         with at least one supporting evidence record."""
         if not claim_ids:
+            return False
+        scoped_claim_ids = set(
+            self.session.scalars(
+                select(Claim.id).where(
+                    Claim.id.in_(claim_ids),
+                    Claim.workspace_id == ctx.workspace_id,
+                    Claim.profile_id == ctx.profile_id,
+                )
+            )
+        )
+        if scoped_claim_ids != set(claim_ids):
             return False
         records = list(
             self.session.scalars(
                 select(EvidenceRecord).where(
                     EvidenceRecord.claim_id.in_(claim_ids),
+                    EvidenceRecord.workspace_id == ctx.workspace_id,
+                    EvidenceRecord.profile_id == ctx.profile_id,
                     EvidenceRecord.supports.is_(True),
                 )
             )

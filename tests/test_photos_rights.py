@@ -10,7 +10,7 @@ from packages.domain.enums import (
     RightsGateOutcome,
     VisualClassification,
 )
-from packages.domain.models import Profile, Workspace
+from packages.domain.models import Profile, Source, Workspace
 from packages.research.photos import PhotoService, UploadRejected
 from packages.research.rights import RightsService
 from packages.shared.execution_context import ExecutionContext
@@ -65,6 +65,32 @@ def test_exact_duplicate_detected(db, world):
     first = photos.import_photo(_ctx(ws, profile), content=PNG_BYTES)
     second = photos.import_photo(_ctx(ws, profile), content=PNG_BYTES)
     assert second.duplicate_of == first.asset.id  # Doc 16 duplicate rule
+
+
+def test_assets_are_isolated_between_profiles(db, world):
+    ws, profile, photos, _ = world
+    other_profile = Profile(
+        workspace_id=ws.id,
+        key="other",
+        name="Other",
+    )
+    db.add(other_profile)
+    db.flush()
+    first = photos.import_photo(_ctx(ws, profile), content=PNG_BYTES)
+    second = photos.import_photo(_ctx(ws, other_profile), content=PNG_BYTES)
+
+    assert second.duplicate_of is None
+    assert photos.find_similar(_ctx(ws, other_profile), first.perceptual_hash) == []
+    assert photos.get_scoped(first.asset.id, _ctx(ws, other_profile)) is None
+
+
+def test_photo_import_rejects_profile_from_another_workspace(db, world):
+    ws, _, photos, _ = world
+    with pytest.raises(LookupError, match="profile not found"):
+        photos.import_photo(
+            ExecutionContext(workspace_id=ws.id, profile_id=uuid.uuid4()),
+            content=PNG_BYTES,
+        )
 
 
 def test_rights_unknown_blocks_publication(db, world):
@@ -123,5 +149,54 @@ def test_foreign_workspace_asset_fails_closed(db, world):
     result = photos.import_photo(_ctx(ws, profile), content=PNG_BYTES)
     with pytest.raises(LookupError):
         rights.evaluate(ExecutionContext(workspace_id=uuid.uuid4()), result.asset.id)
-    # scoped fetch returns None for a foreign workspace (fail-closed contract)
-    assert photos.get_scoped(result.asset.id, uuid.uuid4()) is None
+    # scoped fetch returns None for another profile/workspace (fail-closed contract)
+    assert photos.get_scoped(
+        result.asset.id, ExecutionContext(workspace_id=uuid.uuid4())
+    ) is None
+
+
+def test_rights_operations_are_profile_scoped(db, world):
+    ws, profile, photos, rights = world
+    ctx = _ctx(ws, profile)
+    asset = photos.import_photo(ctx, content=PNG_BYTES).asset
+    record = rights.classify(
+        ctx,
+        asset_id=asset.id,
+        classification=RightsClassification.PUBLIC_DOMAIN,
+    )
+    other_profile = Profile(workspace_id=ws.id, key="rights-other", name="Other")
+    db.add(other_profile)
+    db.flush()
+    foreign_ctx = _ctx(ws, other_profile)
+
+    with pytest.raises(LookupError):
+        rights.evaluate(foreign_ctx, asset.id)
+    with pytest.raises(LookupError):
+        rights.latest_record(foreign_ctx, asset.id)
+    with pytest.raises(LookupError):
+        rights.verify(foreign_ctx, record)
+    assert rights.evaluate(ctx, asset.id) is RightsGateOutcome.BLOCK
+
+
+def test_rights_evidence_source_must_match_asset_profile(db, world):
+    ws, profile, photos, rights = world
+    asset = photos.import_photo(_ctx(ws, profile), content=PNG_BYTES).asset
+    other_profile = Profile(workspace_id=ws.id, key="source-other", name="Other")
+    db.add(other_profile)
+    db.flush()
+    source = Source(
+        workspace_id=ws.id,
+        profile_id=other_profile.id,
+        url="https://other.test/rights",
+        source_type="rss",
+    )
+    db.add(source)
+    db.flush()
+
+    with pytest.raises(LookupError):
+        rights.classify(
+            _ctx(ws, profile),
+            asset_id=asset.id,
+            classification=RightsClassification.PUBLIC_DOMAIN,
+            evidence_source_id=source.id,
+        )

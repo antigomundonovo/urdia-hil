@@ -5,6 +5,7 @@ Workspace-scoped; the detail response includes the Why Panel data (Doc 06).
 Content/QC actions live in content_routes.
 """
 
+from pathlib import Path
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -12,10 +13,13 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from packages.domain.editorial import Opportunity
-from packages.domain.models import Profile
+from apps.api.auth import get_current_user
+from packages.domain.editorial import ContentPackage, Opportunity, OpportunityClaim
+from packages.domain.knowledge import Claim
+from packages.domain.models import Profile, User
 from packages.research.opportunity import OpportunityService
 from packages.shared.db import get_session
+from packages.shared.settings import get_settings
 
 router = APIRouter(prefix="/api/v1")
 
@@ -82,7 +86,10 @@ def run_qc_for_opportunity(
     if package is None:
         raise HTTPException(status_code=404, detail="opportunity has no content package")
     ctx = OpportunityService(session).get_session_ctx(opp)
-    return ContentService(session).run_qc(ctx, package)
+    return ContentService(
+        session,
+        asset_root=Path(get_settings().asset_root),
+    ).run_qc(ctx, package)
 
 
 @router.post("/opportunities/{opportunity_id}/approve")
@@ -90,14 +97,24 @@ def approve_opportunity(
     opportunity_id: UUID,
     workspace_id: UUID = Query(...),
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
-    from packages.research.content import ContentService
+    from packages.research.content import ContentService, PublicationBlocked
 
     opp = OpportunityService(session).get_scoped(opportunity_id, workspace_id)
     if opp is None:
         raise HTTPException(status_code=404, detail="opportunity not found")
-    ctx = OpportunityService(session).get_session_ctx(opp)
-    ContentService(session).approve(ctx, opp)
+    from packages.shared.execution_context import ExecutionContext
+
+    ctx = ExecutionContext(
+        workspace_id=opp.workspace_id,
+        profile_id=opp.profile_id,
+        actor_id=current_user.id,
+    )
+    try:
+        ContentService(session).approve(ctx, opp, approved_by=current_user.id)
+    except PublicationBlocked as err:
+        raise HTTPException(status_code=409, detail=str(err)) from err
     return {"opportunity_id": str(opp.id), "state": opp.state}
 
 
@@ -107,13 +124,20 @@ def reject_opportunity(
     body: RejectBody,
     workspace_id: UUID = Query(...),
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
     from packages.research.content import ContentService
 
     opp = OpportunityService(session).get_scoped(opportunity_id, workspace_id)
     if opp is None:
         raise HTTPException(status_code=404, detail="opportunity not found")
-    ctx = OpportunityService(session).get_session_ctx(opp)
+    from packages.shared.execution_context import ExecutionContext
+
+    ctx = ExecutionContext(
+        workspace_id=opp.workspace_id,
+        profile_id=opp.profile_id,
+        actor_id=current_user.id,
+    )
     ContentService(session).reject(ctx, opp, reason=body.reason)
     return {"opportunity_id": str(opp.id), "state": opp.state}
 
@@ -127,4 +151,38 @@ def get_opportunity(
     opp = OpportunityService(session).get_scoped(opportunity_id, workspace_id)
     if opp is None:
         raise HTTPException(status_code=404, detail="opportunity not found")
-    return _payload(opp)
+    payload = _payload(opp)
+    latest_package = session.scalars(
+        select(ContentPackage)
+        .where(
+            ContentPackage.opportunity_id == opp.id,
+            ContentPackage.workspace_id == workspace_id,
+        )
+        .order_by(ContentPackage.created_at.desc(), ContentPackage.id.desc())
+        .limit(1)
+    ).first()
+    payload["content_package_id"] = str(latest_package.id) if latest_package else None
+    claims = session.scalars(
+        select(Claim)
+        .join(OpportunityClaim, OpportunityClaim.ref_id == Claim.id)
+        .where(
+            OpportunityClaim.opportunity_id == opp.id,
+            OpportunityClaim.workspace_id == workspace_id,
+            Claim.workspace_id == workspace_id,
+            Claim.profile_id == opp.profile_id,
+        )
+        .order_by(Claim.created_at, Claim.id)
+    )
+    payload["claims"] = [
+        {
+            "id": str(claim.id),
+            "text": (
+                claim.editorial_wording
+                or claim.normalized_text
+                or f"{claim.subject or ''} {claim.predicate or ''} {claim.object or ''}".strip()
+            ),
+            "status": claim.status.value if hasattr(claim.status, "value") else str(claim.status),
+        }
+        for claim in claims
+    ]
+    return payload

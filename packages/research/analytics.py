@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from packages.domain.enums import MetricName, QualifiedSignal
+from packages.domain.models import Profile
 from packages.domain.publishing import Comment, MetricEvent, Publication
 from packages.governance.audit import append_audit
 from packages.shared.execution_context import ExecutionContext
@@ -71,6 +72,31 @@ class AnalyticsService:
     def __init__(self, session: Session) -> None:
         self.session = session
 
+    def _publication_for_context(
+        self, ctx: ExecutionContext, publication: Publication
+    ) -> Publication:
+        scoped = self.session.scalars(
+            select(Publication).where(
+                Publication.id == publication.id,
+                Publication.workspace_id == ctx.workspace_id,
+                Publication.profile_id == ctx.profile_id,
+            )
+        ).first()
+        if scoped is None:
+            raise LookupError("publication not found in profile")
+        return scoped
+
+    def _profile_exists(self, workspace_id, profile_id) -> bool:
+        return (
+            self.session.scalars(
+                select(Profile.id).where(
+                    Profile.id == profile_id,
+                    Profile.workspace_id == workspace_id,
+                )
+            ).first()
+            is not None
+        )
+
     # --- metrics (append-only) ---------------------------------------------
 
     def record_metrics(
@@ -81,6 +107,7 @@ class AnalyticsService:
     ) -> int:
         """Each collection appends fresh metric_events — history is never
         overwritten (Doc 15)."""
+        publication = self._publication_for_context(ctx, publication)
         count = 0
         for name, value in values.items():
             metric = MetricName(name.upper())
@@ -106,12 +133,18 @@ class AnalyticsService:
         )
         return count
 
-    def publication_snapshot(self, publication: Publication) -> dict:
+    def publication_snapshot(
+        self, ctx: ExecutionContext, publication: Publication
+    ) -> dict:
         """Latest value per metric for one publication."""
-        pub = publication
+        pub = self._publication_for_context(ctx, publication)
         rows = self.session.execute(
             select(MetricEvent.metric, MetricEvent.value)
-            .where(MetricEvent.publication_id == pub.id)
+            .where(
+                MetricEvent.publication_id == pub.id,
+                MetricEvent.workspace_id == ctx.workspace_id,
+                MetricEvent.profile_id == ctx.profile_id,
+            )
             .order_by(MetricEvent.collected_at.desc())
         ).all()
         latest: dict[str, int] = {}
@@ -132,9 +165,10 @@ class AnalyticsService:
         )
         totals: dict[str, int] = {}
         by_status: dict[str, int] = {}
+        ctx = ExecutionContext(workspace_id=workspace_id, profile_id=profile_id)
         for pub in publications:
             by_status[pub.status] = by_status.get(pub.status, 0) + 1
-            for metric, value in self.publication_snapshot(publication=pub)["metrics"].items():
+            for metric, value in self.publication_snapshot(ctx, pub)["metrics"].items():
                 totals[metric] = totals.get(metric, 0) + value
         return {
             "profile_id": str(profile_id),
@@ -153,6 +187,10 @@ class AnalyticsService:
         text: str,
         author_ref: str | None = None,
     ) -> Comment:
+        if ctx.profile_id is None or not self._profile_exists(ctx.workspace_id, ctx.profile_id):
+            raise LookupError("profile not found in workspace")
+        if publication is not None:
+            publication = self._publication_for_context(ctx, publication)
         intent, signal = classify_comment(text)
         comment = Comment(
             workspace_id=ctx.workspace_id,

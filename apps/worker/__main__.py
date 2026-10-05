@@ -15,41 +15,83 @@ from packages.shared.db import SessionLocal
 
 def build_handlers() -> dict:
     """Job handlers registered as milestones land (Doc 17 order).
-    SOURCE_RETRIEVAL reuses the discovery scan for a single source."""
-    from apps.worker.handlers import claim_verification, discovery_scan
+
+    Real implementations win over stubs: DISCOVERY_SCAN, SOURCE_RETRIEVAL and
+    CLAIM_VERIFICATION use the production handlers (apps.worker.handlers); ten
+    more use handlers_real; the remaining job types stay on no-op stubs until
+    their milestone wiring lands (LLM keys / external APIs / V1 scope).
+    """
+    from apps.worker import handlers
+    from apps.worker.handlers_new import (
+        IMAGE_RESEARCH,
+        PUBLICATION,
+        SOURCE_CLUSTERING,
+        SOURCE_EXTRACTION,
+        VISUAL_GENERATION,
+    )
+    from apps.worker.handlers_real import (
+        ADVERSARIAL_RESEARCH,
+        ANALYTICS_SYNC,
+        CLAIM_EXTRACTION,
+        COMMENT_SYNC,
+        CONTENT_GENERATION,
+        EXPORT,
+        FORMAT_PLANNING,
+        IMAGE_ANALYSIS,
+        LEARNING_ANALYSIS,
+        OPPORTUNITY_ANALYSIS,
+        QC,
+        RIGHTS_RESEARCH,
+    )
 
     return {
-        "DISCOVERY_SCAN": discovery_scan,
-        "SOURCE_RETRIEVAL": discovery_scan,
-        "CLAIM_VERIFICATION": claim_verification,
+        "DISCOVERY_SCAN": handlers.discovery_scan,
+        "SOURCE_RETRIEVAL": handlers.discovery_scan,
+        "CLAIM_VERIFICATION": handlers.claim_verification,
+        "OPPORTUNITY_ANALYSIS": OPPORTUNITY_ANALYSIS,
+        "SOURCE_EXTRACTION": SOURCE_EXTRACTION,
+        "SOURCE_CLUSTERING": SOURCE_CLUSTERING,
+        "IMAGE_ANALYSIS": IMAGE_ANALYSIS,
+        "IMAGE_RESEARCH": IMAGE_RESEARCH,
+        "RIGHTS_RESEARCH": RIGHTS_RESEARCH,
+        "CLAIM_EXTRACTION": CLAIM_EXTRACTION,
+        "ADVERSARIAL_RESEARCH": ADVERSARIAL_RESEARCH,
+        "FORMAT_PLANNING": FORMAT_PLANNING,
+        "CONTENT_GENERATION": CONTENT_GENERATION,
+        "VISUAL_GENERATION": VISUAL_GENERATION,
+        "QC": QC,
+        "EXPORT": EXPORT,
+        "PUBLICATION": PUBLICATION,
+        "ANALYTICS_SYNC": ANALYTICS_SYNC,
+        "COMMENT_SYNC": COMMENT_SYNC,
+        "LEARNING_ANALYSIS": LEARNING_ANALYSIS
     }
 
 
 def run_forever(poll_seconds: float = 2.0) -> int:
-
-    from sqlalchemy import select
-
-    from apps.worker.engine import JOB_RUNNING, JobEngine
-    from packages.domain.models import Job
+    from apps.worker.engine import JobEngine
 
     handlers = build_handlers()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     log = logging.getLogger("urdia.worker")
     log.info("worker started (poll=%ss)", poll_seconds)
     try:
+        with SessionLocal() as session:
+            engine = JobEngine(session, handlers)
+            recovered = engine.recover_running()
+            session.commit()
+            if recovered:
+                log.info("recovered %d RUNNING job(s) from checkpoint", recovered)
+
         while True:
             with SessionLocal() as session:
                 engine = JobEngine(session, handlers)
-                running = session.scalar(select(Job.id).where(Job.status == JOB_RUNNING).limit(1))
-                if running:
-                    recovered = engine.recover_running()
-                    session.commit()
-                    log.info("recovered %d RUNNING job(s) from checkpoint", recovered)
                 job = engine.claim_next()
                 if job is None:
                     session.commit()
                     time.sleep(poll_seconds)
                     continue
+                session.commit()
                 log.info("running job %s (%s) attempt %s", job.id, job.job_type, job.attempt)
                 engine.run_job(job)
                 session.commit()
@@ -75,8 +117,10 @@ def run_once() -> int:
             print(f"recovered {recovered} RUNNING job(s)")
         job = engine.claim_next()
         if job is None:
+            session.commit()
             print("no pending jobs")
             return 0
+        session.commit()
         engine.run_job(job)
         session.commit()
         print(f"job {job.id} → {job.status}")

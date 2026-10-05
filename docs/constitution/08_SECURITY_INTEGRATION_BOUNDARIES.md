@@ -17,6 +17,9 @@ Data Minimization
 Toda operação por ID verifica pertencimento ao workspace/profile antes de revelar dados.
 
 Não confiar apenas em parâmetros enviados pelo frontend.
+Relacionamentos entre oportunidades, claims, fontes, assets e direitos também
+validam o mesmo workspace/profile; IDs válidos isoladamente não autorizam
+vincular dados de outro perfil.
 
 ## Agent boundary
 Agentes não recebem:
@@ -42,6 +45,52 @@ audit
 exports
 Docker image
 ```
+
+## URDIA logout and connected integrations
+Ao sair da URDIA:
+- invalidar a sessão URDIA no servidor e limpar cookies/tokens locais;
+- revogar, quando suportado pelo provider, todos os tokens OAuth e credenciais
+  de integração vinculados ao usuário que encerrou a sessão;
+- remover segredos da disponibilidade operacional da URDIA e marcar essas
+  integrações como desconectadas, exigindo nova conexão após login;
+- impedir novas chamadas e impedir jobs pendentes/de recuperação de reutilizar
+  credenciais desconectadas; preservar checkpoints e histórico dos jobs;
+- auditar a ação sem incluir tokens ou outros segredos.
+
+Logout da URDIA não encerra a sessão global do usuário nos sites ou aplicativos
+dos providers. Revogar uma autorização OAuth e apagar credenciais locais encerra
+o acesso da URDIA; o encerramento da sessão própria do provider só pode ser
+prometido quando a API oficial daquele provider oferecer esse recurso.
+
+O logout afeta integrações pertencentes ao usuário que saiu, não as integrações
+de outros membros do workspace. Essa regra foi aprovada.
+
+## URDIA account authentication
+V1 uses normalized email + password and creates a private workspace for each
+new account. Passwords use Argon2id; the API issues an opaque, random,
+HttpOnly/SameSite cookie and persists only its SHA-256 digest with a 12-hour
+expiry. Protected API routers require both a valid session and workspace
+membership; workspace IDs supplied by the browser are not authorization.
+Login failures are rate-limited per client IP. Session and auth responses are
+not cacheable. Unsafe browser requests require an exact allowed `Origin` to
+prevent cross-site request forgery; login responses do not distinguish unknown
+accounts from incorrect passwords.
+
+Email must be verified before login. Verification and password recovery use
+single-use random tokens; only token digests are persisted. Delivery uses
+configured SMTP with STARTTLS by default; message links and tokens are never
+logged. Password reset revokes every active URDIA session. Account-action
+request endpoints have the same response regardless of whether an account
+exists.
+
+This local-first milestone does not yet implement MFA, distributed rate-limit
+storage, or external account connections. Do not expose self-registration
+publicly until production-grade shared rate limiting and MFA are available.
+The API therefore rejects self-registration unless `APP_ENV` is `development`
+or `test`; deploying a publicly reachable service must not enable registration
+until both safeguards are implemented.
+External OAuth tokens remain backend-only and are not implemented by this
+milestone.
 
 ## SSRF
 Para fetcher externo:

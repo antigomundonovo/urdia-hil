@@ -94,6 +94,9 @@ url_cases = [
     ("https://Site.test/Pagina?utm_source=x#top", "https://site.test/Pagina"),
     ("http://site.test:80/a", "http://site.test/a"),
     ("https://site.test:443/a", "https://site.test/a"),
+    ("https://site.test:80/a", "https://site.test:80/a"),
+    ("http://site.test:443/a", "http://site.test:443/a"),
+    ("https://[2001:db8::1]:443/a", "https://[2001:db8::1]/a"),
     ("https://site.test/x?b=2&a=1", "https://site.test/x?a=1&b=2"),
     ("https://site.test/x?fbclid=zz", "https://site.test/x"),
     ("HTTPS://SITE.TEST/Caminho", "https://site.test/Caminho"),
@@ -156,6 +159,31 @@ case("anti_slop", "clean passes",
 expected_uncertainty = {"CONFIRMED", "PROBABLE", "POSSIBLE", "CONTROVERSIAL", "UNKNOWN", "REFUTED"}
 case("vocabulary", "uncertainty complete",
      {s.value for s in UncertaintyState} == expected_uncertainty, True)
+
+# --- suite: historical facts dataset (owner-provided, Doc 16) ------------------
+# Owner-provided real historical facts are the canonical domain dataset
+# (assets/datasets/historical_facts.json). Structural validation here —
+# verdict-level cases live in tests/test_historical_facts.py (need a DB).
+import json as _json  # noqa: E402
+from pathlib import Path as _Path  # noqa: E402
+
+_DATASET = _Path("assets/datasets/historical_facts.json")
+case("historical_dataset", "dataset exists", _DATASET.is_file(), True)
+if _DATASET.is_file():
+    _data = _json.loads(_DATASET.read_text(encoding="utf-8"))
+    _cases = _data.get("cases", [])
+    case("historical_dataset", "owner provided at least 3 cases", len(_cases) >= 3, True)
+    case("historical_dataset", "case ids unique",
+         len({c.get("id") for c in _cases}) == len(_cases), True)
+    case("historical_dataset", "case statements unique",
+         len({c.get("statement") for c in _cases}) == len(_cases), True)
+    case("historical_dataset", "every case has https source",
+         all(str(c.get("source_url", "")).startswith("https://") for c in _cases), True)
+    case("historical_dataset", "every case has non-empty statement",
+         all(str(c.get("statement", "")).strip() for c in _cases), True)
+    _belief = [c for c in _cases if "popular_belief" in c]
+    case("historical_dataset", "controversy case present (bondinho 1911 vs 1912)",
+         len(_belief) >= 1, True)
 
 # --- report --------------------------------------------------------------------
 failed = [(s, n) for s, n, o in results if o == FAIL]

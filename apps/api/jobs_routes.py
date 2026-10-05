@@ -10,7 +10,9 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from apps.api.auth import get_current_user
 from apps.worker.engine import JobEngine
+from packages.domain.models import User
 from packages.domain.repositories import JobRepository
 from packages.shared.db import get_session
 
@@ -67,8 +69,11 @@ def retry_job(
     job_id: UUID,
     workspace_id: UUID = Query(...),
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
-    job = JobEngine(session, handlers={}).retry_failed(job_id, workspace_id)
+    job = JobEngine(session, handlers={}).retry_failed(
+        job_id, workspace_id, actor_id=current_user.id
+    )
     if job is None:
         raise HTTPException(status_code=404, detail="job not retryable")
     return _job_payload(job)
@@ -79,8 +84,11 @@ def cancel_job(
     job_id: UUID,
     workspace_id: UUID = Query(...),
     session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
 ):
-    job = JobEngine(session, handlers={}).cancel(job_id, workspace_id)
+    job = JobEngine(session, handlers={}).cancel(
+        job_id, workspace_id, actor_id=current_user.id
+    )
     if job is None:
         raise HTTPException(status_code=404, detail="job not cancellable")
     return _job_payload(job)

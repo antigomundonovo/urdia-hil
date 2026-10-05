@@ -10,11 +10,12 @@ docker compose up -d postgres
 .venv/Scripts/python -m alembic upgrade head
 .venv/Scripts/python -m scripts.seed
 
-# 3. API (terminal 1)
-.venv/Scripts/python -m uvicorn apps.api.main:app --host 127.0.0.1 --port 8000
+# 3. API (terminal 1) — se a 8000 estiver OCUPADA (o backend do Studio em
+# C:\Antigomundonovo também usa 8000!), troque a porta e passe a mesma ao web:
+.venv/Scripts/python -m uvicorn apps.api.main:app --host 127.0.0.1 --port 8010
 
 # 4. Interface (terminal 2)
-cd apps/web && npm run dev   # → http://localhost:5173
+cd apps/web && VITE_API_URL=http://localhost:8010 npm run dev   # → http://localhost:5173
 
 # 5. Worker residente (terminal 3, opcional — processa jobs do radar)
 .venv/Scripts/python -m apps.worker
@@ -30,6 +31,25 @@ cd apps/web && npm run dev   # → http://localhost:5173
 - `python -m scripts.backup database` — backup do banco (recomendado: diário)
 - `python -m scripts.backup assets` — backup de imagens originais/derivadas
 - `python -m scripts.benchmark` — suite de benchmarks (Doc 16)
+
+## Fila de jobs (urdia-enqueue)
+
+Jobs são criados por rotinas internas e pela ferramenta de operação — a
+constituição não expõe endpoint público de criação (Doc 02: só GET/retry/cancel).
+
+```bash
+# enfileirar um job (payload ganha eco de workspace/profile automaticamente)
+urdia-enqueue --type DISCOVERY_SCAN --workspace <uuid> --profile <uuid> \
+              --payload '{"source_id": "..."}' --priority 5
+
+# tipos aceitos = enum JobType (Doc 03); ver apps/worker/__main__.py
+urdia-enqueue --list            # 20 jobs mais recentes
+python -m apps.worker --once    # processa um ciclo
+```
+
+Fail-closed: payload sem os ids obrigatórios falha o job sem retry (Doc 03);
+provider indisponível/rate-limit reenfileira com checkpoint. Registro completo
+de handlers reais vs stubs: `apps/worker/handlers_new.py` (docstring) e
 
 ## Backups (Doc 07)
 

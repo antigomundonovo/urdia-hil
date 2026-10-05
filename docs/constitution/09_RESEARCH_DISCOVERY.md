@@ -19,6 +19,20 @@ Internet Archive
 Wikimedia
 ```
 
+Implementados na V1: RSS/Atom, sitemap (URL set e índice com limites de
+documentos/itens), GDELT, pesquisa da API MediaWiki, pesquisa Wikidata e
+metadados acadêmicos Crossref/OpenAlex, Wayback CDX, Internet Archive e
+metadados de arquivos do Wikimedia Commons. A pesquisa geral permanece
+explicitamente indisponível até ter adaptador e testes próprios. Resultados
+desses catálogos e índices são leads de descoberta, nunca evidência por si só;
+metadados de licença do Commons também não substituem a verificação de direitos.
+XML externo é rejeitado e todas as requisições usam o SafeFetcher, com validação
+de redirect, tamanho, timeout, robots e limite por host.
+Retrievals bem-sucedidos persistem ETag e Last-Modified; varreduras seguintes
+enviam validadores condicionais e registram HTTP 304 sem reprocessar resultados.
+Tipos de fonte ainda sem adaptador podem ser cadastrados, mas a API rejeita a
+solicitação de varredura até que a implementação esteja disponível.
+
 ## Pipeline
 ```text
 source config
@@ -44,6 +58,8 @@ Preferir structured extraction/Trafilatura. Browser only quando JS/dynamic conte
 
 ## Deduplication
 Canonical URL + URL normalization + content hash + semantic similarity + source relations.
+Deduplication and clusters are scoped to the source profile; items from another
+profile in the same workspace must not suppress or merge private discoveries.
 
 ## Source dependency
 A cita B, B cita C, C reproduz D devem formar uma cadeia/cluster de dependência e não múltiplas confirmações independentes.

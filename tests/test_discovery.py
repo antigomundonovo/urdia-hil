@@ -1,15 +1,18 @@
 """Discovery engine tests (Doc 09): normalize, dedup, cluster, observability,
 and RSS/Atom adapters against canned feeds — no real network."""
 
+import json
 import uuid
 
 import httpx
 import pytest
 from sqlalchemy import select
 
+from packages.domain.enums import JobType
 from packages.domain.models import (
     DiscoveryCluster,
     DiscoveryItem,
+    Job,
     Profile,
     Retrieval,
     Source,
@@ -53,23 +56,443 @@ def test_canonicalize_url_strips_tracking_and_fragment():
         == "https://site.test/P%C3%A1gina?a=2"
     )
     assert canonicalize_url("http://site.test:80/x") == "http://site.test/x"
+    assert canonicalize_url("https://site.test:80/x") == "https://site.test:80/x"
+    assert canonicalize_url("http://site.test:443/x") == "http://site.test:443/x"
+    assert canonicalize_url("https://[2001:db8::1]:443/x") == "https://[2001:db8::1]/x"
 
 
 def test_parse_feed_rss_and_atom():
     rss_items = _parse_feed(RSS)
     assert len(rss_items) == 2
     assert rss_items[0].url == "http://arquivo.test/post-1?utm_source=x"
-    atom_items = _parse_feed(ATOM)
+    atom_items = _parse_feed(ATOM, "atom")
     assert len(atom_items) == 1
     assert atom_items[0].url == "http://arquivo.test/atom-1"
+    assert atom_items[0].raw["source"] == "atom"
 
 
 def test_unknown_and_unimplemented_adapters_fail_loudly():
     with pytest.raises(AdapterError):
         get_adapter("facebook", None)  # not in Doc 09 list
-    adapter = get_adapter("wikidata", None)  # declared, not implemented yet
+    adapter = get_adapter("search", None)  # declared, not implemented yet
     with pytest.raises(AdapterError, match="not implemented"):
         adapter.fetch_items("http://x.test", None)
+
+
+def test_discovery_job_cannot_scan_source_from_another_profile(db, world):
+    from apps.worker.engine import JOB_FAILED, JobEngine
+    from apps.worker.handlers import discovery_scan
+
+    ws, profile = world
+    other_profile = Profile(
+        workspace_id=ws.id,
+        key="other",
+        name="Other",
+    )
+    db.add(other_profile)
+    db.flush()
+    source = Source(
+        workspace_id=ws.id,
+        profile_id=other_profile.id,
+        url="https://private.test/feed",
+        source_type="rss",
+    )
+    db.add(source)
+    db.flush()
+    job = Job(
+        workspace_id=ws.id,
+        profile_id=profile.id,
+        job_type=JobType.DISCOVERY_SCAN,
+        priority=999,
+        payload={
+            "workspace_id": str(ws.id),
+            "profile_id": str(profile.id),
+            "source_id": str(source.id),
+        },
+    )
+    db.add(job)
+    db.commit()
+
+    engine = JobEngine(db, {"DISCOVERY_SCAN": discovery_scan})
+    assert engine.claim_next() is job
+    engine.run_job(job)
+
+    assert job.status == JOB_FAILED
+    assert "source not found in job profile" in job.error
+
+
+def test_sitemap_adapter_reads_urlsets_and_indexes():
+    from packages.research.adapters import SitemapAdapter
+
+    index_url = "http://public.test/sitemap.xml"
+    child_url = "http://public.test/child.xml"
+    fetcher = _fetcher_for(
+        {
+            index_url: b"""<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+              <sitemap><loc>http://public.test/child.xml</loc></sitemap>
+            </sitemapindex>""",
+            child_url: b"""<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+              <url><loc>https://museum.test/item/1</loc><lastmod>2026-09-30</lastmod></url>
+              <url><loc>https://museum.test/item/2</loc></url>
+            </urlset>""",
+        },
+    )
+
+    items = SitemapAdapter(fetcher).fetch_items(index_url)
+
+    assert [(item.url, item.published_at) for item in items] == [
+        ("https://museum.test/item/1", "2026-09-30"),
+        ("https://museum.test/item/2", None),
+    ]
+    assert all(item.raw == {"source": "sitemap"} for item in items)
+
+
+def test_sitemap_adapter_rejects_dtd_and_invalid_locations():
+    from packages.research.adapters import SitemapAdapter
+
+    dtd_fetcher = _fetcher_for(
+        {
+            "http://public.test/sitemap.xml": b"""<!DOCTYPE foo [<!ENTITY x "boom">]>
+              <urlset><url><loc>https://museum.test/&x;</loc></url></urlset>"""
+        }
+    )
+    with pytest.raises(AdapterError, match="declarations are not allowed"):
+        SitemapAdapter(dtd_fetcher).fetch_items("http://public.test/sitemap.xml")
+
+    invalid_location_fetcher = _fetcher_for(
+        {
+            "http://public.test/sitemap.xml": b"""<urlset>
+              <url><loc>file:///private/data</loc></url></urlset>"""
+        }
+    )
+    with pytest.raises(AdapterError, match="valid absolute HTTP"):
+        SitemapAdapter(invalid_location_fetcher).fetch_items(
+            "http://public.test/sitemap.xml"
+        )
+
+
+def test_sitemap_adapter_wraps_malformed_location_urls():
+    from packages.research.adapters import SitemapAdapter
+
+    fetcher = _fetcher_for(
+        {
+            "http://public.test/sitemap.xml": b"""<urlset>
+              <url><loc>https://[broken/item</loc></url></urlset>"""
+        }
+    )
+    with pytest.raises(AdapterError, match="valid absolute HTTP"):
+        SitemapAdapter(fetcher).fetch_items("http://public.test/sitemap.xml")
+
+
+def test_academic_adapters_normalize_crossref_and_openalex_results():
+    from packages.research.adapters import CrossrefAdapter, OpenAlexAdapter
+
+    crossref_url = "http://public.test/crossref"
+    openalex_url = "http://public.test/openalex"
+    fetcher = _fetcher_for(
+        {
+            crossref_url: json.dumps(
+                {
+                    "message": {
+                        "items": [
+                            {
+                                "DOI": "10.1234/history",
+                                "title": ["História urbana"],
+                                "published": {"date-parts": [[1911, 2, 3]]},
+                                "abstract": (
+                                    "<jats:p xmlns:jats='http://www.w3.org/1999/xhtml'>"
+                                    "Documento <jats:italic>histórico</jats:italic>.</jats:p>"
+                                ),
+                                "publisher": "Arquivo Acadêmico",
+                                "type": "article-journal",
+                            }
+                        ]
+                    }
+                }
+            ).encode(),
+            openalex_url: json.dumps(
+                {
+                    "results": [
+                        {
+                            "id": "https://openalex.org/W1",
+                            "doi": "https://doi.org/10.1234/work",
+                            "display_name": "Estudo documental",
+                            "publication_date": "2024-05-01",
+                            "primary_location": {
+                                "landing_page_url": "https://journal.test/article"
+                            },
+                            "abstract_inverted_index": {
+                                "Fonte": [0],
+                                "primária": [1],
+                                "relevante": [2],
+                            },
+                        }
+                    ]
+                }
+            ).encode(),
+        }
+    )
+
+    crossref = CrossrefAdapter(fetcher).fetch_items(crossref_url)
+    openalex = OpenAlexAdapter(fetcher).fetch_items(openalex_url)
+
+    assert crossref[0].url == "https://doi.org/10.1234/history"
+    assert crossref[0].title == "História urbana"
+    assert crossref[0].summary == "Documento histórico."
+    assert crossref[0].published_at == "1911-02-03"
+    assert crossref[0].raw["publisher"] == "Arquivo Acadêmico"
+    assert openalex[0].url == "https://journal.test/article"
+    assert openalex[0].summary == "Fonte primária relevante"
+    assert openalex[0].published_at == "2024-05-01"
+
+
+def test_openalex_adapter_handles_sparse_abstract_index():
+    from packages.research.adapters import OpenAlexAdapter
+
+    url = "http://public.test/openalex"
+    fetcher = _fetcher_for(
+        {
+            url: json.dumps(
+                {
+                    "results": [
+                        {
+                            "id": "https://openalex.org/W2",
+                            "abstract_inverted_index": {"contexto": [0], "histórico": [2]},
+                        }
+                    ]
+                }
+            ).encode()
+        }
+    )
+    item = OpenAlexAdapter(fetcher).fetch_items(url)[0]
+    assert item.summary == "contexto histórico"
+
+
+def test_adapters_fail_loudly_on_http_errors():
+    from packages.research.adapters import CrossrefAdapter, RssAdapter
+
+    fetcher = _fetcher_for({})
+    with pytest.raises(AdapterError, match="HTTP 404"):
+        RssAdapter(fetcher).fetch_items("http://public.test/missing")
+    with pytest.raises(AdapterError, match="HTTP 404"):
+        CrossrefAdapter(fetcher).fetch_items("http://public.test/missing")
+
+
+def test_gdelt_wikipedia_and_wikidata_normalize_search_results():
+    from packages.research.adapters import GdeltAdapter, WikidataAdapter, WikipediaAdapter
+
+    gdelt_url = "http://public.test/gdelt"
+    wikipedia_url = "http://public.test/wikipedia"
+    wikidata_url = "http://public.test/wikidata"
+    fetcher = _fetcher_for(
+        {
+            gdelt_url: json.dumps(
+                {
+                    "articles": [
+                        {
+                            "url": "https://news.test/history",
+                            "title": "Arquivo histórico localizado",
+                            "seendate": "20260930120000",
+                            "domain": "news.test",
+                            "language": "Portuguese",
+                            "sourcecountry": "Brazil",
+                        },
+                        {"url": "file:///private/item", "title": "Reject"},
+                    ]
+                }
+            ).encode(),
+            wikipedia_url: json.dumps(
+                {
+                    "query": {
+                        "pages": [
+                            {
+                                "pageid": 42,
+                                "title": "História urbana",
+                                "fullurl": "https://pt.wikipedia.org/wiki/Hist%C3%B3ria",
+                                "extract": "Resumo enciclopédico.",
+                                "timestamp": "2026-09-30T12:00:00Z",
+                            }
+                        ]
+                    }
+                }
+            ).encode(),
+            wikidata_url: json.dumps(
+                {
+                    "search": [
+                        {
+                            "id": "Q42",
+                            "label": "Documento histórico",
+                            "description": "objeto arquivístico",
+                        },
+                        {"id": "not-an-entity", "label": "Reject"},
+                    ]
+                }
+            ).encode(),
+        }
+    )
+
+    gdelt = GdeltAdapter(fetcher).fetch_items(gdelt_url)
+    wikipedia = WikipediaAdapter(fetcher).fetch_items(wikipedia_url)
+    wikidata = WikidataAdapter(fetcher).fetch_items(wikidata_url)
+
+    assert len(gdelt) == 1
+    assert gdelt[0].title == "Arquivo histórico localizado"
+    assert gdelt[0].raw["source_country"] == "Brazil"
+    assert wikipedia[0].summary == "Resumo enciclopédico."
+    assert wikipedia[0].raw["page_id"] == 42
+    assert wikidata[0].url == "https://www.wikidata.org/wiki/Q42"
+    assert wikidata[0].summary == "objeto arquivístico"
+
+
+def test_wayback_and_internet_archive_normalize_archive_results():
+    from packages.research.adapters import InternetArchiveAdapter, WaybackAdapter
+
+    wayback_url = "http://public.test/cdx"
+    archive_url = "http://public.test/archive"
+    fetcher = _fetcher_for(
+        {
+            wayback_url: json.dumps(
+                [
+                    ["timestamp", "original", "statuscode", "mimetype", "digest"],
+                    [
+                        "19500102030405",
+                        "https://archive.test/document",
+                        "200",
+                        "text/html",
+                        "sha1:abcd",
+                    ],
+                    ["malformed"],
+                    [
+                        "20201399000000",
+                        "https://archive.test/invalid-date",
+                        "200",
+                        "text/html",
+                        "sha1:no",
+                    ],
+                    [
+                        "20200101000000",
+                        "file:///private/item",
+                        "200",
+                        "text/html",
+                        "sha1:no",
+                    ],
+                ]
+            ).encode(),
+            archive_url: json.dumps(
+                {
+                    "response": {
+                        "docs": [
+                            {
+                                "identifier": "historical_document_1",
+                                "title": ["Documento Histórico"],
+                                "description": ["<p>Registro <b>catalogado</b>.</p>"],
+                                "date": "1950",
+                                "mediatype": "texts",
+                                "creator": ["Arquivo Nacional"],
+                            },
+                            {"identifier": "../outside", "title": "Reject"},
+                        ]
+                    }
+                }
+            ).encode(),
+        }
+    )
+
+    captures = WaybackAdapter(fetcher).fetch_items(wayback_url)
+    records = InternetArchiveAdapter(fetcher).fetch_items(archive_url)
+
+    assert len(captures) == 1
+    assert captures[0].url == (
+        "https://web.archive.org/web/19500102030405id_/https://archive.test/document"
+    )
+    assert captures[0].raw["original_url"] == "https://archive.test/document"
+    assert captures[0].raw["digest"] == "sha1:abcd"
+    assert len(records) == 1
+    assert records[0].url == "https://archive.org/details/historical_document_1"
+    assert records[0].title == "Documento Histórico"
+    assert records[0].summary == "Registro catalogado."
+    assert records[0].raw["creator"] == ["Arquivo Nacional"]
+
+
+def test_wikimedia_normalizes_commons_provenance_metadata():
+    from packages.research.adapters import WikimediaAdapter
+
+    url = "http://public.test/commons"
+    fetcher = _fetcher_for(
+        {
+            url: json.dumps(
+                {
+                    "query": {
+                        "pages": {
+                            "99": {
+                                "pageid": 99,
+                                "title": "File:Photo.jpg",
+                                "canonicalurl": (
+                                    "https://commons.wikimedia.org/wiki/File:Photo.jpg"
+                                ),
+                                "imageinfo": [
+                                    {
+                                        "url": "https://upload.wikimedia.org/file.jpg",
+                                        "extmetadata": {
+                                            "ImageDescription": {
+                                                "value": "<p>Imagem de &amp; arquivo.</p>"
+                                            },
+                                            "Artist": {"value": "<a>Fotógrafa</a>"},
+                                            "LicenseShortName": {"value": "CC BY-SA 4.0"},
+                                            "LicenseUrl": {
+                                                "value": "<a>https://creativecommons.org/licenses/by-sa/4.0/</a>"
+                                            },
+                                        },
+                                    }
+                                ],
+                            },
+                            "100": {
+                                "pageid": 100,
+                                "title": "File:Unsafe.jpg",
+                                "canonicalurl": "javascript:alert(1)",
+                            },
+                        }
+                    }
+                }
+            ).encode()
+        }
+    )
+
+    items = WikimediaAdapter(fetcher).fetch_items(url)
+
+    assert len(items) == 1
+    assert items[0].summary == "Imagem de & arquivo."
+    assert items[0].raw["file_url"] == "https://upload.wikimedia.org/file.jpg"
+    assert items[0].raw["creator"] == "Fotógrafa"
+    assert items[0].raw["license"] == "CC BY-SA 4.0"
+    assert items[0].raw["license_url"] == "https://creativecommons.org/licenses/by-sa/4.0/"
+
+
+@pytest.mark.parametrize(
+    ("adapter_name", "body"),
+    [
+        ("wayback", b'{"not":"a CDX array"}'),
+        ("internet_archive", b'{"response":{"unexpected":[]}}'),
+        ("wikimedia", b'{"query":{"unexpected":[]}}'),
+    ],
+)
+def test_archive_adapters_reject_malformed_catalog_responses(adapter_name, body):
+    from packages.research.adapters import (
+        InternetArchiveAdapter,
+        WaybackAdapter,
+        WikimediaAdapter,
+    )
+
+    adapters = {
+        "wayback": WaybackAdapter,
+        "internet_archive": InternetArchiveAdapter,
+        "wikimedia": WikimediaAdapter,
+    }
+    url = f"http://public.test/{adapter_name}"
+    adapter = adapters[adapter_name](_fetcher_for({url: body}))
+
+    with pytest.raises(AdapterError):
+        adapter.fetch_items(url)
 
 
 @pytest.fixture()
@@ -113,6 +536,102 @@ def test_scan_creates_items_dedups_and_clusters(db, world):
     assert len(retrievals) == 2
 
 
+def test_scan_uses_persisted_http_validators_and_records_not_modified(db, world):
+    ws, profile = world
+    source = Source(
+        workspace_id=ws.id,
+        profile_id=profile.id,
+        url="http://public.test/conditional-feed",
+        source_type="rss",
+    )
+    db.add(source)
+    db.flush()
+    request_headers: list[httpx.Headers] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        request_headers.append(request.headers)
+        if request.headers.get("if-none-match") == '"feed-v1"':
+            return httpx.Response(304)
+        return httpx.Response(
+            200,
+            content=RSS,
+            headers={
+                "etag": '"feed-v1"',
+                "last-modified": "Tue, 29 Sep 2026 10:00:00 GMT",
+            },
+        )
+
+    fetcher = SafeFetcher(
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        respect_robots=False,
+        min_host_interval=0.0,
+        resolver=lambda host: ["93.184.216.34"],
+    )
+    engine = DiscoveryEngine(db, fetcher)
+
+    first = engine.scan_source(source)
+    db.flush()
+    second = engine.scan_source(source)
+    db.flush()
+    retrievals = list(
+        db.scalars(
+            select(Retrieval)
+            .where(Retrieval.source_id == source.id)
+            .order_by(Retrieval.created_at, Retrieval.id)
+        )
+    )
+
+    assert first.status == "OK"
+    assert first.items_new == 2
+    assert second.status == "NOT_MODIFIED"
+    assert second.items_seen == second.items_new == second.duplicates == 0
+    assert request_headers[1]["if-none-match"] == '"feed-v1"'
+    assert request_headers[1]["if-modified-since"] == "Tue, 29 Sep 2026 10:00:00 GMT"
+    successful = next(retrieval for retrieval in retrievals if retrieval.status == "OK")
+    not_modified = next(
+        retrieval for retrieval in retrievals if retrieval.status == "NOT_MODIFIED"
+    )
+    assert successful.http_status == 200
+    assert not_modified.http_status == 304
+    assert all(retrieval.etag == '"feed-v1"' for retrieval in retrievals)
+    assert all(
+        retrieval.last_modified == "Tue, 29 Sep 2026 10:00:00 GMT"
+        for retrieval in retrievals
+    )
+    assert successful.content_hash == not_modified.content_hash
+
+
+def test_scan_records_http_failures_without_losing_source_state(db, world):
+    ws, profile = world
+    source = Source(
+        workspace_id=ws.id,
+        profile_id=profile.id,
+        url="http://public.test/unavailable-feed",
+        source_type="rss",
+    )
+    db.add(source)
+    db.flush()
+    fetcher = SafeFetcher(
+        client=httpx.Client(
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(503, content=b"temporarily unavailable")
+            )
+        ),
+        respect_robots=False,
+        min_host_interval=0.0,
+        resolver=lambda host: ["93.184.216.34"],
+    )
+
+    report = DiscoveryEngine(db, fetcher).scan_source(source)
+    retrieval = db.scalar(select(Retrieval).where(Retrieval.source_id == source.id))
+
+    assert report.status == "FAILED"
+    assert "HTTP 503" in report.error
+    assert retrieval.status == "FAILED"
+    assert retrieval.http_status == 503
+    assert source.last_seen_at is None
+
+
 def test_same_content_in_two_sources_clusters_not_duplicates(db, world):
     ws, profile = world
     s1 = Source(
@@ -154,6 +673,71 @@ def test_same_content_in_two_sources_clusters_not_duplicates(db, world):
     assert len(clusters) == 1  # one story, not two
     assert len(items) == 1  # the copy is a dependency, not a new item
     assert clusters[0].item_count == 2  # two source instances of one story
+
+
+def test_discovery_deduplication_does_not_cross_profile_boundaries(db, world):
+    ws, profile = world
+    other_profile = Profile(
+        workspace_id=ws.id,
+        key="another",
+        name="Another profile",
+    )
+    db.add(other_profile)
+    db.flush()
+    sources = [
+        Source(
+            workspace_id=ws.id,
+            profile_id=profile.id,
+            url="http://a.test/feed",
+            source_type="rss",
+        ),
+        Source(
+            workspace_id=ws.id,
+            profile_id=other_profile.id,
+            url="http://b.test/feed",
+            source_type="rss",
+        ),
+    ]
+    db.add_all(sources)
+    db.flush()
+
+    def feed_with(url: str) -> bytes:
+        return (
+            b'<?xml version="1.0"?><rss version="2.0"><channel><item>'
+            b"<title>Shared topic</title><link>"
+            + url.encode()
+            + b"</link><description>Identical summary.</description>"
+            b"</item></channel></rss>"
+        )
+
+    engine = DiscoveryEngine(
+        db,
+        _fetcher_for(
+            {
+                "http://a.test/feed": feed_with("http://a.test/story"),
+                "http://b.test/feed": feed_with("http://b.test/story"),
+            }
+        ),
+    )
+
+    assert engine.scan_source(sources[0]).items_new == 1
+    assert engine.scan_source(sources[1]).items_new == 1
+    items = list(
+        db.scalars(
+            select(DiscoveryItem)
+            .where(DiscoveryItem.workspace_id == ws.id)
+            .order_by(DiscoveryItem.profile_id)
+        )
+    )
+    clusters = list(
+        db.scalars(
+            select(DiscoveryCluster).where(DiscoveryCluster.workspace_id == ws.id)
+        )
+    )
+
+    assert {item.profile_id for item in items} == {profile.id, other_profile.id}
+    assert len(clusters) == 2
+    assert {cluster.item_count for cluster in clusters} == {1}
 
 
 def test_fetch_blocked_source_records_failure(db, world):

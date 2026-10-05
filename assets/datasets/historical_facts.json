@@ -1,0 +1,52 @@
+{
+  "dataset": "historical_facts",
+  "version": 1,
+  "provided_by": "dono do projeto (lote humano, 2026-10-02)",
+  "description": "Casos históricos reais do Antigo Mundo Novo para benchmarks de verificação (Doc 16). Cada caso: alegação factual verificável + fonte de referência. O caso bondinho inclui 'popular_belief': uma crença comum CONTRÁRIA ao fato real, usada para testar detecção de controvérsia.",
+  "cases": [
+    {
+      "id": "H1",
+      "statement": "A cidade do Rio de Janeiro foi fundada em 1º de março de 1565 pelo capitão português Estácio de Sá, com o nome de 'São Sebastião do Rio de Janeiro'.",
+      "source_name": "IBGE Cidades — Histórico do Rio de Janeiro",
+      "source_url": "https://cidades.ibge.gov.br/brasil/rj/rio-de-janeiro/historico"
+    },
+    {
+      "id": "H2",
+      "statement": "O Rio de Janeiro foi a capital do Brasil por quase 200 anos, de 1763 até 1960, quando a capital foi transferida para Brasília.",
+      "source_name": "Câmara dos Deputados — Rádio Câmara",
+      "source_url": "https://www.camara.leg.br/radio/programas/550868"
+    },
+    {
+      "id": "H3",
+      "statement": "O primeiro trecho do Bondinho do Pão de Açúcar, entre a Praia Vermelha e o Morro da Urca, foi inaugurado em 27 de outubro de 1912.",
+      "popular_belief": "O bondinho começou a operar em 1911",
+      "source_name": "Wikipédia — Bondinho do Pão de Açúcar",
+      "source_url": "https://pt.wikipedia.org/wiki/Bondinho_do_Pão_de_Açúcar",
+      "note": "Crença comum (1911) é contrária ao fato real (1912) — caso canônico de controvérsia."
+    },
+    {
+      "id": "H4",
+      "statement": "O Cristo Redentor foi inaugurado no dia 12 de outubro de 1931, no alto do Corcovado; a construção durou cerca de 5 anos.",
+      "source_name": "Brasil Escola — História do Cristo Redentor",
+      "source_url": "https://brasilescola.uol.com.br/curiosidades/historia-cristo-redentor.htm"
+    },
+    {
+      "id": "H5",
+      "statement": "A transferência da capital federal do Rio de Janeiro para Brasília ocorreu em 21 de abril de 1960, durante o governo de Juscelino Kubitschek.",
+      "source_name": "Senado Federal — Agência Senado",
+      "source_url": "https://www12.senado.leg.br/noticias/especiais/arquivo-s/brasilia-a-capital-que-precisou-de-150-anos-para-sair-do-papel"
+    },
+    {
+      "id": "H6",
+      "statement": "A chegada da corte portuguesa ao Rio de Janeiro em 1808 transformou a cidade no centro de decisão do Império Português.",
+      "source_name": "Wikipédia — Rio de Janeiro",
+      "source_url": "https://pt.wikipedia.org/wiki/Rio_de_Janeiro"
+    },
+    {
+      "id": "H7",
+      "statement": "Com a Proclamação da República em 1889, o município do Rio de Janeiro tornou-se o Distrito Federal, condição que manteve até a mudança da capital em 1960.",
+      "source_name": "Mundo Educação (UOL) — Rio de Janeiro",
+      "source_url": "https://mundoeducacao.uol.com.br/geografia/rio-de-janeiro.htm"
+    }
+  ]
+}

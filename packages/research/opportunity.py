@@ -13,6 +13,7 @@ V1 (Doc 00 §22).
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from packages.domain.assets import Asset
 from packages.domain.editorial import (
     Opportunity,
     OpportunityAsset,
@@ -26,7 +27,8 @@ from packages.domain.enums import (
     RightsGateOutcome,
     UncertaintyState,
 )
-from packages.domain.knowledge import Claim
+from packages.domain.knowledge import Claim, Story
+from packages.domain.models import Profile, Source
 from packages.domain.state_machine import TransitionError
 from packages.governance.audit import append_audit
 from packages.governance.transition_service import TransitionService
@@ -62,6 +64,24 @@ class OpportunityService:
     ) -> Opportunity:
         if ctx.profile_id is None:
             raise ValueError("opportunity requires profile context")
+        profile = self.session.scalars(
+            select(Profile).where(
+                Profile.id == ctx.profile_id,
+                Profile.workspace_id == ctx.workspace_id,
+            )
+        ).first()
+        if profile is None:
+            raise LookupError("profile not found in workspace")
+        if story_id is not None:
+            story = self.session.scalars(
+                select(Story).where(
+                    Story.id == story_id,
+                    Story.workspace_id == ctx.workspace_id,
+                    Story.profile_id == ctx.profile_id,
+                )
+            ).first()
+            if story is None:
+                raise LookupError("story not found in profile")
         # Doc 12: never invent urgency — what arrives is what is kept
         opp = Opportunity(
             workspace_id=ctx.workspace_id,
@@ -110,6 +130,43 @@ class OpportunityService:
         claim_ids=(),
         asset_ids=(),
     ):
+        opportunity = self._opportunity_for_context(ctx, opportunity)
+        source_ids = list(source_ids)
+        claim_ids = list(claim_ids)
+        asset_ids = list(asset_ids)
+        scoped_ids = (
+            (
+                select(Source.id).where(
+                    Source.id.in_(source_ids),
+                    Source.workspace_id == ctx.workspace_id,
+                    Source.profile_id == ctx.profile_id,
+                ),
+                set(source_ids),
+                "source",
+            ),
+            (
+                select(Claim.id).where(
+                    Claim.id.in_(claim_ids),
+                    Claim.workspace_id == ctx.workspace_id,
+                    Claim.profile_id == ctx.profile_id,
+                ),
+                set(claim_ids),
+                "claim",
+            ),
+            (
+                select(Asset.id).where(
+                    Asset.id.in_(asset_ids),
+                    Asset.workspace_id == ctx.workspace_id,
+                    Asset.profile_id == ctx.profile_id,
+                ),
+                set(asset_ids),
+                "asset",
+            ),
+        )
+        for statement, expected_ids, resource_name in scoped_ids:
+            found_ids = set(self.session.scalars(statement)) if expected_ids else set()
+            if found_ids != expected_ids:
+                raise LookupError(f"{resource_name} not found in opportunity profile")
         for sid in source_ids:
             self.session.add(
                 OpportunitySource(
@@ -141,6 +198,7 @@ class OpportunityService:
         **kwargs,
     ):
         """Move the opportunity through the state machine (audited, fail closed)."""
+        opp = self._opportunity_for_context(ctx, opp)
         current = OpportunityState(opp.state)
         self.transitions.apply(
             ctx,
@@ -192,13 +250,19 @@ class OpportunityService:
     def jev_recommend(self, ctx: ExecutionContext, opp: Opportunity) -> JEVRecommendationResult:
         """Deterministic recommendation from the opportunity's own data
         (Doc 12). Human review always required in V1."""
+        opp = self._opportunity_for_context(ctx, opp)
         reasons: list[str] = []
 
         claims = list(
             self.session.scalars(
                 select(Claim)
                 .join(OpportunityClaim, OpportunityClaim.ref_id == Claim.id)
-                .where(OpportunityClaim.opportunity_id == opp.id)
+                .where(
+                    OpportunityClaim.opportunity_id == opp.id,
+                    OpportunityClaim.workspace_id == ctx.workspace_id,
+                    Claim.workspace_id == ctx.workspace_id,
+                    Claim.profile_id == ctx.profile_id,
+                )
             )
         )
 
@@ -268,6 +332,7 @@ class OpportunityService:
     ) -> Opportunity:
         """Records the (human-reviewed) JEV decision and applies its state
         transition. PROCEED advances the machine; other decisions park it."""
+        opp = self._opportunity_for_context(ctx, opp)
         rec = self.jev_recommend(ctx, opp)
         opp.decision = decision.value
         opp.decision_reason = reason or "; ".join(rec.reasons)
@@ -294,3 +359,17 @@ class OpportunityService:
             reason=opp.decision_reason,
         )
         return opp
+
+    def _opportunity_for_context(
+        self, ctx: ExecutionContext, opportunity: Opportunity
+    ) -> Opportunity:
+        scoped = self.session.scalars(
+            select(Opportunity).where(
+                Opportunity.id == opportunity.id,
+                Opportunity.workspace_id == ctx.workspace_id,
+                Opportunity.profile_id == ctx.profile_id,
+            )
+        ).first()
+        if scoped is None:
+            raise LookupError("opportunity not found in profile")
+        return scoped
