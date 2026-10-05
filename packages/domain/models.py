@@ -107,6 +107,30 @@ class WorkspaceMember(Base, TimestampMixin):
     __table_args__ = (UniqueConstraint("workspace_id", "user_id", name="uq_workspace_member"),)
 
 
+class MachineClient(Base, TimestampMixin):
+    """API key client for the Studio⇄HIL bridge (Emenda 002: auth
+    máquina-a-máquina + allowlist). Only a token digest is persisted; the
+    raw key is shown once at creation. Machine clients can only reach the
+    bridge router — the allowlist is the router itself."""
+
+    __tablename__ = "machine_clients"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    key_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        UniqueConstraint("key_hash", name="uq_machine_clients_key_hash"),
+        Index("ix_machine_clients_workspace", "workspace_id"),
+    )
+
+
 class Profile(Base, TimestampMixin):
     """Fields per Doc 04. Unique: (workspace_id, key)."""
 
