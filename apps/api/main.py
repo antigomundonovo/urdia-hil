@@ -9,6 +9,7 @@ from apps.api.auth_routes import router as auth_router
 from apps.api.bridge_routes import router as bridge_router
 from apps.api.content_routes import router as content_router
 from apps.api.jobs_routes import router as jobs_router
+from apps.api.memory_routes import router as memory_router
 from apps.api.opportunities_routes import router as opportunities_router
 from apps.api.profiles_routes import router as profiles_router
 from apps.api.registry_routes import router as registry_router
@@ -40,6 +41,8 @@ app.include_router(social_router, dependencies=[Depends(require_workspace_access
 # export routes authenticate the machine key themselves (allowlist = this
 # router, Emenda 002).
 app.include_router(bridge_router)
+# Auxiliary memory: enforces workspace membership itself (workspace_id in body).
+app.include_router(memory_router)
 # TikTok connection flow: no session dependency — the OAuth landing uses
 # the short-lived single-use authorization code as credential (local machine).
 app.include_router(tiktok_router)

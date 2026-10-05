@@ -10,7 +10,7 @@
 |------|------|--------|--------|
 | V2.1 | **Ponte Studio⇄HIL (OpenClaw)** — auth máquina-a-máquina + allowlist + export de demanda §10 | Emenda 002 Opção C | **EM ANDAMENTO** (2026-10-05): modelo `machine_clients`, migração `f1a2b3c4d5e6`, `apps/api/bridge_routes.py` (gestão de chaves por sessão humana + `GET /api/v1/bridge/demand` por chave de máquina), testes `tests/test_bridge.py` |
 | V2.1a | Consumo do lado Studio: Studio lê `/bridge/demand` na cópia dele | contrato §10 | Pendente (requer cooperação da IA do Studio em `C:\Antigomundonovo`) |
-| V2.2 | **Hermes** — memória auxiliar estruturada (Doc 05 §Memory) | Emenda 002 | Reservado até Learning ter dados reais |
+| V2.2 | **Hermes** — memória auxiliar estruturada (Doc 05 §Memory) | Emenda 002 | **BASE ENTREGUE** (2026-10-05): modelo `agent_memories` (6 tipos, origem obrigatória p/ FACT fail-closed, supersede/archive append-only), `packages/research/memory.py`, API `/api/v1/memory`, testes. Uso real quando o Learning tiver dados |
 | V2.3 | **MiroFish** — simulação de cenários editoriais | Emenda 002 | Reservado até ter dados reais |
 | V2.4 | **DuckDB** — analítica offline read-only sobre metric_events/audit | Emenda 004 | Reservado até volume justificar |
 | V2.5 | **Música** — declaração de direitos musicais (`music` → DECLARED) | Emenda 012 / Doc 13 | Fora do pipeline V1 |

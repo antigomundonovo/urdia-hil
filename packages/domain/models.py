@@ -399,3 +399,35 @@ class DiscoveryItem(Base, TimestampMixin):
         Index("ix_discovery_items_status", "status"),
         Index("ix_discovery_items_content_hash", "content_hash"),
     )
+
+
+class AgentMemory(Base, TimestampMixin):
+    """Auxiliary structured memory (Doc 05 §Memory; V2.2 Hermes). Auxiliary
+    only — never a canonical factual source (Emenda 002). FACT entries must
+    carry origin (source + provenance); enforced fail-closed in the service."""
+
+    __tablename__ = "agent_memories"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
+    )
+    profile_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("profiles.id"))
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    # Provenance: {"source_type": ..., "source_id": ..., "url": ...,
+    # "recorded_by": ...} — required for FACT (Doc 05: "toda memória
+    # factual deve possuir origem").
+    origin: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    confidence: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="ACTIVE"
+    )
+    superseded_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("agent_memories.id"))
+    created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+
+    __table_args__ = (
+        Index("ix_agent_memories_workspace", "workspace_id"),
+        Index("ix_agent_memories_kind", "kind"),
+        Index("ix_agent_memories_status", "status"),
+    )
