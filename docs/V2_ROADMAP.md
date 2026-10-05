@@ -12,7 +12,7 @@
 | V2.1a | Consumo do lado Studio: Studio lê `/bridge/demand` na cópia dele | contrato §10 | Pendente (requer cooperação da IA do Studio em `C:\Antigomundonovo`) |
 | V2.2 | **Hermes** — memória auxiliar estruturada (Doc 05 §Memory) | Emenda 002 | **BASE ENTREGUE** (2026-10-05): modelo `agent_memories` (6 tipos, origem obrigatória p/ FACT fail-closed, supersede/archive append-only), `packages/research/memory.py`, API `/api/v1/memory`, testes. Uso real quando o Learning tiver dados |
 | V2.3 | **MiroFish** — simulação de cenários editoriais | Emenda 002 | Reservado até ter dados reais |
-| V2.4 | **DuckDB** — analítica offline read-only sobre metric_events/audit | Emenda 004 | Reservado até volume justificar |
+| V2.4 | **DuckDB** — analítica offline read-only sobre metric_events/audit | Emenda 004 | **FERRAMENTA ENTREGUE** (2026-10-05): `packages/analytics/offline.py` (export read-only de tabelas append-only p/ snapshot DuckDB imutável) + `scripts/duckdb_export.py`; adoção rotineira quando o volume justificar |
 | V2.5 | **Música** — declaração de direitos musicais (`music` → DECLARED) | Emenda 012 / Doc 13 | Fora do pipeline V1 |
 
 ## Regras da ponte (V2.1)
