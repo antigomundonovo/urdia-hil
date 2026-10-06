@@ -12,6 +12,7 @@ from apps.api.main import app
 from packages.domain.models import MachineClient, User, Workspace, WorkspaceMember
 from packages.domain.social import AudienceDemand
 from packages.shared.db import get_session
+from packages.shared.execution_context import ExecutionContext
 
 ORIGIN = {"Origin": "http://localhost:5173"}
 
@@ -184,5 +185,62 @@ def test_machine_key_cannot_cross_workspaces(db):
         )
         # 404, never data or even existence hints from another workspace.
         assert cross.status_code in (401, 404)
+    finally:
+        app.dependency_overrides.pop(get_session, None)
+
+
+def test_demand_decision_flows_to_bridge(db):
+    from packages.domain.social import AudienceDemand
+    from packages.research.social import SocialError, SocialIntelligenceService
+
+    _override_session(db)
+    from packages.domain.models import Profile
+
+    workspace = Workspace(name="Decision WS")
+    db.add(workspace)
+    db.flush()
+    profile = Profile(workspace_id=workspace.id, key="default", name="Default")
+    db.add(profile)
+    db.flush()
+    demand = AudienceDemand(
+        workspace_id=workspace.id,
+        profile_id=profile.id,
+        summary="historia do bondinho",
+        unique_people_count=2,
+        platforms=["instagram"],
+    )
+    db.add(demand)
+    db.commit()
+    ctx = ExecutionContext(workspace_id=workspace.id, profile_id=profile.id)
+
+    svc = SocialIntelligenceService(db)
+    try:
+        svc.decide_demand(ctx, demand.id, decision="MAYBE")
+        raise AssertionError("should have raised")
+    except SocialError as exc:
+        assert "APPROVED or REJECTED" in str(exc)
+
+    decided = svc.decide_demand(
+        ctx, demand.id, decision="APPROVED", reason="dono aprovou"
+    )
+    assert decided.decision == "APPROVED"
+    assert decided.decided_at is not None
+
+    # Bridge export carries the decision read-only.
+    key_raw = MACHINE_KEY_PREFIX + uuid4().hex
+    client = MachineClient(
+        workspace_id=workspace.id, name="K", key_hash=token_digest(key_raw)
+    )
+    db.add(client)
+    db.commit()
+    try:
+        api = TestClient(app)
+        payload = api.get(
+            "/api/v1/bridge/demand",
+            params={"workspace_id": str(workspace.id)},
+            headers={"Authorization": f"Bearer {key_raw}"},
+        ).json()
+        assert payload[0]["decision"] == "APPROVED"
+        assert payload[0]["decided_at"]
     finally:
         app.dependency_overrides.pop(get_session, None)

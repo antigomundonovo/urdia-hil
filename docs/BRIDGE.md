@@ -41,10 +41,22 @@ mais recentes primeiro:
     "platforms": ["instagram"],
     "confidence": 0.8,
     "editorial_fit": 0.9,
+    "decision": "PENDING | APPROVED | REJECTED",
+    "decided_at": "2026-10-06T… | null",
     "created_at": "2026-10-05T…"
   }
 ]
 ```
+
+**`decision` (V2.1b)** é a decisão HUMANA do dono no painel do HIL
+(contrato §10: demanda → decisão humana → Studio). Use-a para priorizar:
+- `APPROVED` — o dono quer este conteúdo; pode entrar na fila editorial
+  como sugestão para revisão humana no Studio.
+- `PENDING` — ainda não decidido; mostre, mas não priorize.
+- `REJECTED` — o dono descartou; não sugira produção.
+
+A decisão é gravada no HIL com auditoria (`SOCIAL_DEMAND_DECIDED`) e é
+**somente leitura** pela ponte — quem decide é o dono no painel do HIL.
 
 Erros: `401` chave ausente/inválida/revogada · `404` workspace de outra
 chave (nunca revela existência).

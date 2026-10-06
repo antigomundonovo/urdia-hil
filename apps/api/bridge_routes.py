@@ -189,6 +189,8 @@ def export_audience_demand(
             "platforms": d.platforms,
             "confidence": d.confidence,
             "editorial_fit": d.editorial_fit,
+            "decision": d.decision,
+            "decided_at": d.decided_at.isoformat() if d.decided_at else None,
             "created_at": d.created_at.isoformat() if d.created_at else None,
         }
         for d in demands

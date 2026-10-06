@@ -483,6 +483,41 @@ class SocialIntelligenceService:
             "created_at": demand.created_at.isoformat(),
         }
 
+    def decide_demand(
+        self,
+        ctx: ExecutionContext,
+        demand_id: uuid.UUID,
+        *,
+        decision: str,
+        actor_id: uuid.UUID | None = None,
+        reason: str | None = None,
+    ):
+        """Owner's human decision on a demand (contrato §10). Append-only
+        audit; the bridge exposes the decision read-only to the Studio."""
+        from datetime import datetime as _dt
+
+        if decision not in {"APPROVED", "REJECTED"}:
+            raise SocialError("decision must be APPROVED or REJECTED")
+        demand = self.get_demand(ctx, demand_id)
+        if demand is None:
+            raise SocialError("demand not found")
+        previous = demand.decision
+        demand.decision = decision
+        demand.decided_at = _dt.now(UTC)
+        demand.decided_by = actor_id
+        append_audit(
+            self.session,
+            ctx=ctx,
+            action="SOCIAL_DEMAND_DECIDED",
+            entity_type="audience_demand",
+            entity_id=demand.id,
+            previous_state=previous,
+            new_state=decision,
+            reason=reason,
+        )
+        self.session.flush()
+        return demand
+
     def get_demand(self, ctx: ExecutionContext, demand_id: uuid.UUID):
         from packages.domain.social import AudienceDemand
         self._require_profile(ctx)
