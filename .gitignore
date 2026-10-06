@@ -61,3 +61,7 @@ worktrees/
 artifacts/*
 !artifacts/llm-benchmark-20261004-184937.json
 !artifacts/llm-benchmark-20261004-193716.json
+
+# áudio do catálogo local (não versionar)
+assets/music/
+assets/music-test/

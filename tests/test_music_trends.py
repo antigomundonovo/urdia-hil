@@ -150,10 +150,18 @@ class TestTrendStates:
 
 class TestSourcesHonest:
     @pytest.mark.parametrize("platform", ["instagram", "facebook", "youtube", "tiktok", "kwai"])
-    def test_no_official_api_means_unavailable(self, platform):
-        """§14: sem API oficial conectada → UNAVAILABLE, nunca sinal fabricado."""
+    def test_no_official_api_means_unavailable(self, platform, monkeypatch):
+        """§14: sem API oficial conectada → UNAVAILABLE, nunca sinal fabricado.
+        Independente do .env: simula ausência de credenciais."""
+        monkeypatch.setattr(
+            "packages.shared.settings.get_settings",
+            lambda: type("S", (), {"youtube_api_key": "",
+                                    "youtube_trend_region": "BR"})(),
+        )
         adapter = get_adapters()[platform]
-        with pytest.raises(Exception, match="TREND_SOURCE_UNAVAILABLE"):
+        from packages.providers.trend_sources import TrendSourceUnavailable
+
+        with pytest.raises(TrendSourceUnavailable):
             adapter.fetch()
 
     def test_stale_signal_detected(self):
@@ -217,8 +225,14 @@ class TestStudioGateway:
 
 
 class TestYouTubeAdapter:
-    def test_without_key_is_unavailable(self):
-        """Sem YOUTUBE_API_KEY → UNAVAILABLE honesto (nada fabricado)."""
+    def test_without_key_is_unavailable(self, monkeypatch):
+        """Sem YOUTUBE_API_KEY → UNAVAILABLE honesto (nada fabricado).
+        Independente do .env: simula ausência de credenciais."""
+        monkeypatch.setattr(
+            "packages.shared.settings.get_settings",
+            lambda: type("S", (), {"youtube_api_key": "",
+                                    "youtube_trend_region": "BR"})(),
+        )
         adapter = get_adapters()["youtube"]
         from packages.providers.trend_sources import TrendSourceUnavailable
 
