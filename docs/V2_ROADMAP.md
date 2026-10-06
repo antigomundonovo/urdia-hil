@@ -14,7 +14,7 @@
 | V2.2 | **Hermes** — memória auxiliar estruturada (Doc 05 §Memory) | Emenda 002 | **BASE ENTREGUE** (2026-10-05): modelo `agent_memories` (6 tipos, origem obrigatória p/ FACT fail-closed, supersede/archive append-only), `packages/research/memory.py`, API `/api/v1/memory`, testes. Uso real quando o Learning tiver dados |
 | V2.3 | **MiroFish** — simulação de cenários editoriais | Emenda 002 | Reservado até ter dados reais |
 | V2.4 | **DuckDB** — analítica offline read-only sobre metric_events/audit | Emenda 004 | **FERRAMENTA ENTREGUE** (2026-10-05): `packages/analytics/offline.py` (export read-only de tabelas append-only p/ snapshot DuckDB imutável) + `scripts/duckdb_export.py`; adoção rotineira quando o volume justificar |
-| V2.5 | **Música** — declaração de direitos musicais (`music` → DECLARED) | Emenda 012 / Doc 13 | Fora do pipeline V1 |
+| V2.5 | **Música** — declaração de direitos musicais (`music` → DECLARED) | Emenda 012 / Doc 13 | **SUPERADA pela Emenda 014** (2026-10-06): sistema de som/música completo — catálogo com MusicDNA e direitos fail-closed (ORIGINAL/LICENSED/PLATFORM_LIMITED/UNKNOWN/BLOCKED), AudioPlan com portão humano, MusicProvider, kit de exportação com trilha, tendências honestas (TREND SIGNAL ≠ LICENSE). UI: página /audio + cartão na oportunidade |
 
 ## Regras da ponte (V2.1)
 
