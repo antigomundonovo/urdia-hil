@@ -6,6 +6,7 @@ creates a new event, never overwrites).
 
 import uuid
 from datetime import datetime
+from typing import Any
 
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
@@ -35,6 +36,19 @@ class Publication(Base):
     error: Mapped[str | None] = mapped_column(Text)
     idempotency_key: Mapped[str | None] = mapped_column(String(128))
     approved_by: Mapped[uuid.UUID | None] = mapped_column()
+    # Idioma da publicação (Emenda 014, copiado do package na export).
+    language_code: Mapped[str | None] = mapped_column(String(8))
+    locale_code: Mapped[str | None] = mapped_column(String(16))
+    # SOURCE ≠ TARGET (referência §47): preservado na adaptação/publicação.
+    source_language_code: Mapped[str | None] = mapped_column(String(8))
+    source_locale_code: Mapped[str | None] = mapped_column(String(16))
+    target_language_code: Mapped[str | None] = mapped_column(String(8))
+    target_locale_code: Mapped[str | None] = mapped_column(String(16))
+    # Resultado de áudio HONESTO (Emenda 014 §5): o plano aprovado e o que
+    # realmente foi tecnicamente aplicado — nunca fingir sucesso.
+    audio_mode: Mapped[str | None] = mapped_column(String(32))
+    audio_applied: Mapped[bool | None] = mapped_column()
+    audio_detail: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

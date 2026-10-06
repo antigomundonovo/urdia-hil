@@ -440,8 +440,21 @@ class SocialIntelligenceService:
         evidence: dict | None = None,
     ):
         from packages.domain.social import AudienceDemand
+        from packages.multilingual import LanguageError, normalize_language_tag
 
         self._require_profile(ctx)
+        # Idioma da demanda (Emenda 014): herda da configuração editorial
+        # do perfil — nunca da plataforma.
+        language_code = None
+        locale_code = None
+        profile = self.session.get(Profile, ctx.profile_id)
+        if profile is not None:
+            language_code, locale_code = profile.language_code, profile.locale_code
+            if not language_code and profile.language:
+                try:
+                    language_code, locale_code = normalize_language_tag(profile.language)
+                except LanguageError:
+                    pass
         demand = AudienceDemand(
             workspace_id=ctx.workspace_id,
             profile_id=ctx.profile_id,
@@ -453,6 +466,8 @@ class SocialIntelligenceService:
             platforms=platforms,
             confidence=0.0,
             editorial_fit=0.0,
+            language_code=language_code,
+            locale_code=locale_code,
         )
         self.session.add(demand)
         self.session.flush()
@@ -477,11 +492,48 @@ class SocialIntelligenceService:
             "unique_people_count": demand.unique_people_count,
             "growth": demand.growth,
             "engagement": demand.engagement,
+            "language_code": demand.language_code,
+            "locale_code": demand.locale_code,
             "platforms": demand.platforms,
             "confidence": demand.confidence,
             "editorial_fit": demand.editorial_fit,
             "created_at": demand.created_at.isoformat(),
         }
+
+    def decide_demand(
+        self,
+        ctx: ExecutionContext,
+        demand_id: uuid.UUID,
+        *,
+        decision: str,
+        actor_id: uuid.UUID | None = None,
+        reason: str | None = None,
+    ):
+        """Owner's human decision on a demand (contrato §10). Append-only
+        audit; the bridge exposes the decision read-only to the Studio."""
+        from datetime import datetime as _dt
+
+        if decision not in {"APPROVED", "REJECTED"}:
+            raise SocialError("decision must be APPROVED or REJECTED")
+        demand = self.get_demand(ctx, demand_id)
+        if demand is None:
+            raise SocialError("demand not found")
+        previous = demand.decision
+        demand.decision = decision
+        demand.decided_at = _dt.now(UTC)
+        demand.decided_by = actor_id
+        append_audit(
+            self.session,
+            ctx=ctx,
+            action="SOCIAL_DEMAND_DECIDED",
+            entity_type="audience_demand",
+            entity_id=demand.id,
+            previous_state=previous,
+            new_state=decision,
+            reason=reason,
+        )
+        self.session.flush()
+        return demand
 
     def get_demand(self, ctx: ExecutionContext, demand_id: uuid.UUID):
         from packages.domain.social import AudienceDemand

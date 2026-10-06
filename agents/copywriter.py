@@ -132,7 +132,34 @@ def build_context(session: Session, ctx: ExecutionContext, package) -> dict[str,
         "key_message": (canonical.key_message if canonical else "") or "",
         "format": package.format,
         "claims": claims,
+        "language_instruction": _language_instruction(session, ctx, package, canonical),
     }
+
+
+def _language_instruction(session: Session, ctx: ExecutionContext, package, canonical) -> str:
+    """Contrato de idioma (Emenda 014 §8): destino EXPLÍCITO no prompt —
+    conteúdo canônico > perfil (configuração editorial) > default
+    editorial documentado. Nunca deduzido da plataforma."""
+    from packages.domain.models import Profile
+    from packages.domain.profile_defaults import DEFAULT_EDITORIAL_POLICY
+    from packages.multilingual import LanguageError, describe_pair, normalize_language_tag
+
+    language_code = (canonical.language_code if canonical else None) or package.language_code
+    locale_code = (canonical.locale_code if canonical else None) or package.locale_code
+    if not language_code and ctx.profile_id:
+        profile = session.get(Profile, ctx.profile_id)
+        if profile is not None:
+            if profile.language_code:
+                language_code, locale_code = profile.language_code, profile.locale_code
+            elif profile.language:
+                try:
+                    language_code, locale_code = normalize_language_tag(profile.language)
+                except LanguageError:
+                    pass
+    if not language_code:
+        language_code = DEFAULT_EDITORIAL_POLICY["language_code"]
+        locale_code = DEFAULT_EDITORIAL_POLICY["locale_code"]
+    return describe_pair(language_code, locale_code)
 
 
 def _render_prompt(context: dict[str, Any], extra_instructions: str) -> str:
@@ -145,6 +172,7 @@ def _render_prompt(context: dict[str, Any], extra_instructions: str) -> str:
         .replace("{editorial_angle}", context["editorial_angle"])
         .replace("{key_message}", context["key_message"])
         .replace("{format}", context["format"] or "PHOTO_POST")
+        .replace("{language_instruction}", context["language_instruction"])
         .replace("{extra_instructions}", extra_instructions or "(nenhuma)")
         .replace("{claims_block}", claims_block)
     )

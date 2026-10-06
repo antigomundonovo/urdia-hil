@@ -109,6 +109,17 @@ class AudienceDemand(Base):
     platforms: Mapped[list[str]] = mapped_column(JSONB, nullable=False)
     confidence: Mapped[float] = mapped_column(nullable=False, default=0.0)
     editorial_fit: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    # Human decision (contrato §10: demand -> human decision -> Studio).
+    # PENDING until the owner decides; the bridge exposes it read-only.
+    decision: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="PENDING"
+    )
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    decided_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+    # Idioma da audiência/demanda (Emenda 014): herda do perfil na
+    # detecção; a ponte exporta read-only para o Studio.
+    language_code: Mapped[str | None] = mapped_column(String(8))
+    locale_code: Mapped[str | None] = mapped_column(String(16))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -116,6 +127,7 @@ class AudienceDemand(Base):
     __table_args__ = (
         Index("ix_audience_demands_workspace", "workspace_id"),
         Index("ix_audience_demands_profile", "profile_id"),
+        Index("ix_audience_demands_decision", "decision"),
     )
 
 

@@ -288,9 +288,43 @@ def list_audience_demand(
             "unique_people_count": d.unique_people_count,
             "growth": d.growth,
             "confidence": d.confidence,
+            "decision": d.decision,
+            "language_code": d.language_code,
+            "locale_code": d.locale_code,
         }
         for d in demands
     ]
+
+class DemandDecisionBody(BaseModel):
+    profile_id: UUID
+    decision: str
+    reason: str | None = None
+
+@router.post("/social/audience/demand/{demand_id}/decision")
+def decide_audience_demand(
+    demand_id: UUID,
+    payload: DemandDecisionBody,
+    workspace_id: UUID = Query(...),
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    service = SocialIntelligenceService(session)
+    try:
+        demand = service.decide_demand(
+            _ctx(workspace_id, payload.profile_id, current_user.id),
+            demand_id,
+            decision=payload.decision,
+            actor_id=current_user.id,
+            reason=payload.reason,
+        )
+        session.commit()
+    except SocialError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {
+        "id": str(demand.id),
+        "decision": demand.decision,
+        "decided_at": demand.decided_at.isoformat() if demand.decided_at else None,
+    }
 
 @router.get("/social/audience/pulse")
 def get_audience_pulse(

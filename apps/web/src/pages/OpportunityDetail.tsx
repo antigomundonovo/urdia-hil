@@ -302,6 +302,8 @@ export default function OpportunityDetail() {
         )}
       </section>
 
+      {packageId && <MusicCard packageId={packageId} />}
+
       <section className="rounded-lg border border-stone-200 bg-white p-5">
         <h3 className="text-sm font-semibold uppercase tracking-wide text-stone-500">
           Revisão humana (Documento 00 §22)
@@ -386,5 +388,197 @@ export default function OpportunityDetail() {
         )}
       </section>
     </div>
+  );
+}
+
+interface AudioPlanView {
+  id: string;
+  audio_mode: string;
+  layers: {
+    music?: {
+      track_id: string;
+      title: string;
+      artist?: string | null;
+      mood?: string | null;
+      intensity?: string | null;
+      volume?: number;
+      start_time?: number;
+      end_time?: number;
+      attribution_required?: boolean;
+      license_type?: string;
+    } | null;
+  } | null;
+  reason: string | null;
+  rights_state: string | null;
+  status: string;
+  decision_reason: string | null;
+}
+
+function MusicCard({ packageId }: { packageId: string }) {
+  const { workspaceId } = useProfile();
+  const queryClient = useQueryClient();
+  const [message, setMessage] = useState<string | null>(null);
+  const [rejecting, setRejecting] = useState(false);
+  const [reason, setReason] = useState("");
+
+  const plan = useQuery({
+    queryKey: ["audio-plan", packageId, workspaceId],
+    enabled: !!packageId && !!workspaceId,
+    queryFn: () =>
+      api.get<AudioPlanView | null>(
+        `/api/v1/audio/packages/${packageId}/plan?workspace_id=${workspaceId}`
+      ),
+  });
+
+  const suggest = useMutation({
+    mutationFn: () =>
+      api.post<AudioPlanView>(
+        `/api/v1/audio/packages/${packageId}/suggest?workspace_id=${workspaceId}`,
+        { platform: "instagram" }
+      ),
+    onSuccess: (d) => {
+      setMessage(
+        d.audio_mode === "NONE"
+          ? "Nenhuma trilha segura no catálogo para este conteúdo — ele funciona sem música."
+          : "Sugestão gerada. Revise abaixo e aprove se concordar."
+      );
+      void queryClient.invalidateQueries({ queryKey: ["audio-plan", packageId] });
+    },
+    onError: (e) => setMessage((e as Error).message),
+  });
+
+  const decide = useMutation({
+    mutationFn: ({ decision, reason }: { decision: string; reason?: string }) =>
+      api.post(
+        `/api/v1/audio/plans/${plan.data?.id}/decision?workspace_id=${workspaceId}`,
+        { decision, reason: reason || undefined }
+      ),
+    onSuccess: (_d, vars) => {
+      setMessage(
+        vars.decision === "APPROVED"
+          ? "Plano de música aprovado — a trilha entra no pacote de exportação."
+          : "Plano rejeitado — o conteúdo será publicado sem música."
+      );
+      setRejecting(false);
+      setReason("");
+      void queryClient.invalidateQueries({ queryKey: ["audio-plan", packageId] });
+    },
+    onError: (e) => setMessage((e as Error).message),
+  });
+
+  const music = plan.data?.layers?.music;
+  const busy = suggest.isPending || decide.isPending;
+  const suggested = plan.data?.status === "SUGGESTED";
+  const approved = plan.data?.status === "APPROVED" && plan.data.audio_mode !== "NONE";
+
+  return (
+    <section className="rounded-lg border border-stone-200 bg-white p-5">
+      <h3 className="text-sm font-semibold uppercase tracking-wide text-stone-500">
+        Trilha sonora (música)
+      </h3>
+      {!plan.data && (
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => suggest.mutate()}
+            disabled={busy}
+            className="rounded bg-stone-900 px-4 py-2 text-sm font-medium text-white hover:bg-stone-700 disabled:opacity-40"
+          >
+            1. Sugerir trilha do catálogo
+          </button>
+          <span className="text-xs text-stone-500">
+            música é opcional — o conteúdo funciona sem ela
+          </span>
+        </div>
+      )}
+      {plan.data && (
+        <div className="mt-3 space-y-2 text-sm">
+          <p>
+            <strong>Modo:</strong> {plan.data.audio_mode === "NONE" ? "sem música" : "com música"}
+            {" · "}
+            <span className={plan.data.rights_state === "LICENSED" ? "text-green-800" : "text-red-700"}>
+              direitos: {plan.data.rights_state ?? "—"}
+            </span>
+          </p>
+          {music && (
+            <p>
+              <strong>Sugestão:</strong> {music.title}
+              {music.artist ? ` — ${music.artist}` : ""} · trecho {music.start_time ?? 0}s→
+              {music.end_time ?? "?"}s · volume {music.volume ?? 0.2}
+              {music.attribution_required ? " · exige créditos na legenda" : ""}
+            </p>
+          )}
+          {plan.data.reason && (
+            <p className="text-xs italic text-stone-500">Por quê: {plan.data.reason}</p>
+          )}
+          {suggested && !rejecting && (
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <button
+                onClick={() => decide.mutate({ decision: "APPROVED" })}
+                disabled={busy || plan.data.audio_mode === "NONE"}
+                className="rounded bg-green-700 px-4 py-2 text-sm font-medium text-white hover:bg-green-800 disabled:opacity-40"
+              >
+                2. Aprovar música
+              </button>
+              <button
+                onClick={() => setRejecting(true)}
+                disabled={busy}
+                className="rounded border border-red-300 px-4 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:opacity-40"
+              >
+                3. Rejeitar (sem música)
+              </button>
+              <button
+                onClick={() => suggest.mutate()}
+                disabled={busy}
+                className="rounded border border-stone-300 px-4 py-2 text-sm font-medium hover:bg-stone-50 disabled:opacity-40"
+              >
+                Sugerir outra
+              </button>
+            </div>
+          )}
+          {suggested && rejecting && (
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <input
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                placeholder="motivo (opcional)"
+                className="w-64 rounded border border-stone-300 px-3 py-1.5 text-xs"
+              />
+              <button
+                onClick={() => decide.mutate({ decision: "REJECTED", reason })}
+                disabled={busy}
+                className="rounded bg-stone-900 px-4 py-2 text-sm font-medium text-white hover:bg-stone-700 disabled:opacity-40"
+              >
+                Confirmar sem música
+              </button>
+              <button
+                onClick={() => setRejecting(false)}
+                className="rounded border border-stone-300 px-4 py-2 text-sm font-medium hover:bg-stone-50"
+              >
+                Cancelar
+              </button>
+            </div>
+          )}
+          {plan.data.status === "REJECTED" && (
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              <button
+                onClick={() => suggest.mutate()}
+                disabled={busy}
+                className="rounded bg-stone-900 px-4 py-2 text-sm font-medium text-white hover:bg-stone-700 disabled:opacity-40"
+              >
+                Sugerir trilha novamente
+              </button>
+            </div>
+          )}
+          {approved && (
+            <p className="text-xs text-green-800">
+              Trilha aprovada — incluída no kit de exportação (postagem manual).
+              As APIs das plataformas não anexam trilha no upload; isso é
+              registrado com honestidade.
+            </p>
+          )}
+        </div>
+      )}
+      {message && <p className="mt-2 text-sm text-stone-700">{message}</p>}
+    </section>
   );
 }

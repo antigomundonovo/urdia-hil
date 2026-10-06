@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { api } from "../api";
+import { api, API_URL } from "../api";
 import { useProfile } from "../profile";
 
 interface InboxItem {
@@ -33,6 +33,7 @@ interface AudienceDemand {
   unique_people_count: number;
   growth: string | null;
   confidence: string | null;
+  decision: string;
 }
 
 interface AudiencePulse {
@@ -142,6 +143,23 @@ export default function Social() {
     onError: (e) => setMessage((e as Error).message),
   });
 
+  const decideDemand = useMutation({
+    mutationFn: ({ demandId, decision, reason }: { demandId: string; decision: string; reason?: string }) =>
+      api.post(
+        `/api/v1/social/audience/demand/${demandId}/decision?workspace_id=${workspaceId}`,
+        { profile_id: profile?.id, decision, reason: reason || undefined }
+      ),
+    onSuccess: (_d, vars) => {
+      setMessage(
+        vars.decision === "APPROVED"
+          ? "Demanda aprovada — o Studio já enxerga esta decisão."
+          : "Demanda rejeitada — o Studio já enxerga esta decisão."
+      );
+      queryClient.invalidateQueries({ queryKey: ["social-demand"] });
+    },
+    onError: (e) => setMessage((e as Error).message),
+  });
+
   const dismissChallenge = useMutation({
     mutationFn: ({ challengeId, reason }: { challengeId: string; reason: string }) =>
       api.post(
@@ -170,6 +188,8 @@ export default function Social() {
       {message && <p className="text-sm text-stone-600">{message}</p>}
 
       <TikTokCard card={card} />
+
+      <BridgeCard card={card} />
 
       <section className={card}>
         <div className="flex items-center justify-between gap-4">
@@ -300,15 +320,14 @@ export default function Social() {
         </h3>
         <ul className="mt-3 space-y-3">
           {(demand.data ?? []).map((d) => (
-            <li key={d.id} className="flex items-center justify-between gap-4 border-b border-stone-100 pb-3">
-              <div>
-                <p className="text-sm text-stone-800">{d.summary}</p>
-                <span className="text-xs text-stone-400">
-                  {d.unique_people_count} pessoa(s) · confiança {d.confidence ?? "—"}
-                  {d.growth ? ` · tendência ${d.growth}` : ""}
-                </span>
-              </div>
-            </li>
+            <DemandRow
+              key={d.id}
+              demand={d}
+              busy={decideDemand.isPending}
+              onDecide={(decision, reason) =>
+                decideDemand.mutate({ demandId: d.id, decision, reason })
+              }
+            />
           ))}
           {demand.data?.length === 0 && (
             <li className="text-sm text-stone-400">Sem demanda mapeada ainda.</li>
@@ -332,6 +351,109 @@ export default function Social() {
         </div>
       </section>
     </div>
+  );
+}
+
+function DemandRow({
+  demand,
+  onDecide,
+  busy,
+}: {
+  demand: AudienceDemand;
+  onDecide: (decision: string, reason?: string) => void;
+  busy: boolean;
+}) {
+  const [rejecting, setRejecting] = useState(false);
+  const [reason, setReason] = useState("");
+  const [changing, setChanging] = useState(false);
+  const pending = demand.decision === "PENDING" || changing;
+
+  return (
+    <li className="border-b border-stone-100 pb-3">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <p className="text-sm text-stone-800">{demand.summary}</p>
+          <span className="text-xs text-stone-400">
+            {demand.unique_people_count} pessoa(s) · confiança {demand.confidence ?? "—"}
+            {demand.growth ? ` · tendência ${demand.growth}` : ""}
+          </span>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {demand.decision === "APPROVED" && !changing && (
+            <span className="rounded bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800">
+              Aprovada por você ✓
+            </span>
+          )}
+          {demand.decision === "REJECTED" && !changing && (
+            <span className="rounded bg-red-100 px-2 py-0.5 text-xs font-medium text-red-800">
+              Rejeitada por você
+            </span>
+          )}
+          {demand.decision !== "PENDING" && !changing && (
+            <button
+              onClick={() => setChanging(true)}
+              disabled={busy}
+              className="rounded border border-stone-300 px-3 py-1.5 text-xs font-medium hover:bg-stone-50 disabled:opacity-40"
+            >
+              Mudar
+            </button>
+          )}
+          {pending && !rejecting && (
+            <>
+              <button
+                onClick={() => {
+                  onDecide("APPROVED");
+                  setChanging(false);
+                }}
+                disabled={busy}
+                className="rounded bg-green-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-green-800 disabled:opacity-40"
+              >
+                Aprovar
+              </button>
+              <button
+                onClick={() => setRejecting(true)}
+                disabled={busy}
+                className="rounded border border-red-300 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-40"
+              >
+                Rejeitar…
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+      {pending && rejecting && (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <input
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="motivo da rejeição (opcional)"
+            className="w-64 rounded border border-stone-300 px-3 py-1.5 text-xs"
+          />
+          <button
+            onClick={() => {
+              onDecide("REJECTED", reason || undefined);
+              setRejecting(false);
+              setChanging(false);
+              setReason("");
+            }}
+            disabled={busy}
+            className="rounded bg-stone-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-stone-700 disabled:opacity-40"
+          >
+            Confirmar rejeição
+          </button>
+          <button
+            onClick={() => {
+              setRejecting(false);
+              setChanging(false);
+              setReason("");
+            }}
+            className="rounded border border-stone-300 px-3 py-1.5 text-xs font-medium hover:bg-stone-50"
+          >
+            Cancelar
+          </button>
+        </div>
+      )}
+    </li>
   );
 }
 
@@ -576,6 +698,164 @@ function TikTokCard({ card }: { card: string }) {
         </button>
       </div>
       {tiktokMessage && <p className="mt-3 text-sm text-stone-700">{tiktokMessage}</p>}
+    </section>
+  );
+}
+
+interface BridgeClient {
+  id: string;
+  name: string;
+  revoked: boolean;
+  last_used_at: string | null;
+  created_at: string | null;
+}
+
+function CopyRow({ label, value, emphasis }: { label: string; value: string; emphasis?: boolean }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+    } catch {
+      // clipboard can be blocked (older browser/permission) — select fallback
+      const ta = document.createElement("textarea");
+      ta.value = value;
+      document.body.append(ta);
+      ta.select();
+      document.execCommand("copy");
+      ta.remove();
+    }
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1500);
+  };
+  return (
+    <div className="flex items-center gap-2">
+      <span className="w-40 shrink-0 text-stone-500">{label}:</span>
+      <code className={`break-all ${emphasis ? "font-semibold text-amber-900" : "text-stone-800"}`}>{value}</code>
+      <button
+        onClick={copy}
+        title={`Copiar ${label.toLowerCase()}`}
+        className="shrink-0 rounded border border-stone-300 bg-white px-2 py-0.5 text-[11px] font-medium text-stone-700 hover:bg-stone-100"
+      >
+        {copied ? "copiado ✓" : "copiar"}
+      </button>
+    </div>
+  );
+}
+
+function BridgeCard({ card }: { card: string }) {
+  const { workspaceId } = useProfile();
+  const queryClient = useQueryClient();
+  const [newKey, setNewKey] = useState<string | null>(null);
+  const [bridgeMessage, setBridgeMessage] = useState<string | null>(null);
+
+  const clients = useQuery({
+    queryKey: ["bridge-clients"],
+    queryFn: () =>
+      api.get<BridgeClient[]>(
+        `/api/v1/bridge/clients?workspace_id=${workspaceId}`
+      ),
+    enabled: !!workspaceId,
+  });
+
+  const create = useMutation({
+    mutationFn: (name: string) =>
+      api.post<{ api_key: string }>("/api/v1/bridge/clients", {
+        workspace_id: workspaceId,
+        name,
+      }),
+    onSuccess: (d) => {
+      setNewKey(d.api_key);
+      setBridgeMessage(
+        "Chave criada! Copie agora — ela NUNCA mais será exibida."
+      );
+      queryClient.invalidateQueries({ queryKey: ["bridge-clients"] });
+    },
+    onError: (e) => setBridgeMessage((e as Error).message),
+  });
+
+  const revoke = useMutation({
+    mutationFn: (id: string) =>
+      api.del(
+        `/api/v1/bridge/clients/${id}?workspace_id=${workspaceId}`
+      ),
+    onSuccess: () => {
+      setBridgeMessage("Chave revogada — o Studio perde o acesso na hora.");
+      queryClient.invalidateQueries({ queryKey: ["bridge-clients"] });
+    },
+    onError: (e) => setBridgeMessage((e as Error).message),
+  });
+
+  const active = clients.data?.filter((c) => !c.revoked) ?? [];
+
+  return (
+    <section className={card}>
+      <h3 className="text-sm font-semibold uppercase tracking-wide text-stone-500">
+        Ponte Studio · chaves de acesso de máquina
+      </h3>
+      <p className="mt-2 text-xs text-stone-600">
+        Permite ao URDIA Studio <strong>somente ler</strong> a demanda da
+        audiência (nada publica, nada apaga). Crie uma chave, entregue ao
+        Studio, e revogue se desconfiar de qualquer coisa.
+      </p>
+      {workspaceId && (
+        <div className="mt-3 rounded border border-stone-200 bg-stone-50 p-3">
+          <p className="text-xs font-medium text-stone-700">
+            Dados de conexão (copie para a tela “Conectar ao HIL” do Studio):
+          </p>
+          <div className="mt-2 space-y-1 text-xs">
+            <CopyRow label="URL da API do HIL" value={API_URL} />
+            <CopyRow label="Workspace ID do HIL" value={workspaceId} />
+          </div>
+        </div>
+      )}
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <button
+          onClick={() => create.mutate("URDIA Studio")}
+          disabled={create.isPending || !workspaceId}
+          className="rounded bg-stone-900 px-4 py-2 text-sm font-medium text-white hover:bg-stone-700 disabled:opacity-40"
+        >
+          1. Criar chave de acesso
+        </button>
+      </div>
+      {newKey && (
+        <div className="mt-3 rounded border border-amber-300 bg-amber-50 p-3">
+          <p className="text-xs font-medium text-amber-900">
+            Copie a chave agora (não será mostrada de novo):
+          </p>
+          <CopyRow label="Chave de acesso" value={newKey} emphasis />
+
+        </div>
+      )}
+      <div className="mt-4 space-y-2">
+        {active.length === 0 && (
+          <p className="text-xs text-stone-500">Nenhuma chave ativa.</p>
+        )}
+        {active.map((c) => (
+          <div
+            key={c.id}
+            className="flex flex-wrap items-center justify-between gap-2 rounded border border-stone-200 px-3 py-2"
+          >
+            <div className="text-xs">
+              <span className="font-medium">{c.name}</span>
+              <span className="ml-2 text-stone-500">
+                {c.last_used_at
+                  ? `usada em ${new Date(c.last_used_at).toLocaleString("pt-BR")}`
+                  : "nunca usada"}
+              </span>
+            </div>
+            <button
+              onClick={() => revoke.mutate(c.id)}
+              disabled={revoke.isPending}
+              className="rounded border border-red-300 px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-40"
+            >
+              Revogar
+            </button>
+          </div>
+        ))}
+      </div>
+      {bridgeMessage && (
+        <p className="mt-3 text-sm text-stone-700">{bridgeMessage}</p>
+      )}
     </section>
   );
 }

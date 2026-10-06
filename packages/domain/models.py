@@ -107,6 +107,30 @@ class WorkspaceMember(Base, TimestampMixin):
     __table_args__ = (UniqueConstraint("workspace_id", "user_id", name="uq_workspace_member"),)
 
 
+class MachineClient(Base, TimestampMixin):
+    """API key client for the Studio⇄HIL bridge (Emenda 002: auth
+    máquina-a-máquina + allowlist). Only a token digest is persisted; the
+    raw key is shown once at creation. Machine clients can only reach the
+    bridge router — the allowlist is the router itself."""
+
+    __tablename__ = "machine_clients"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    key_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        UniqueConstraint("key_hash", name="uq_machine_clients_key_hash"),
+        Index("ix_machine_clients_workspace", "workspace_id"),
+    )
+
+
 class Profile(Base, TimestampMixin):
     """Fields per Doc 04. Unique: (workspace_id, key)."""
 
@@ -118,7 +142,11 @@ class Profile(Base, TimestampMixin):
     )
     key: Mapped[str] = mapped_column(String(64), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Legado (formato livre, ex. "pt-BR"). Contrato canônico (Emenda 014):
+    # language_code + locale_code.
     language: Mapped[str | None] = mapped_column(String(16))
+    language_code: Mapped[str | None] = mapped_column(String(8))
+    locale_code: Mapped[str | None] = mapped_column(String(16))
     audience_region: Mapped[str | None] = mapped_column(String(64))
     editorial_policy: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     visual_identity: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
@@ -275,7 +303,11 @@ class Source(Base, TimestampMixin):
     source_type: Mapped[str] = mapped_column(String(32), nullable=False)
     publication_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     event_proximity: Mapped[str | None] = mapped_column(String(32))
+    # Idioma da FONTE (legado + contrato canônico, Emenda 014). Não é o
+    # idioma do conteúdo de destino — esse vive em canonical_contents etc.
     language: Mapped[str | None] = mapped_column(String(16))
+    language_code: Mapped[str | None] = mapped_column(String(8))
+    locale_code: Mapped[str | None] = mapped_column(String(16))
     jurisdiction: Mapped[str | None] = mapped_column(String(64))
     access_type: Mapped[str | None] = mapped_column(String(32))
     archive_status: Mapped[str | None] = mapped_column(String(32))
@@ -374,4 +406,36 @@ class DiscoveryItem(Base, TimestampMixin):
         Index("ix_discovery_items_workspace_id", "workspace_id"),
         Index("ix_discovery_items_status", "status"),
         Index("ix_discovery_items_content_hash", "content_hash"),
+    )
+
+
+class AgentMemory(Base, TimestampMixin):
+    """Auxiliary structured memory (Doc 05 §Memory; V2.2 Hermes). Auxiliary
+    only — never a canonical factual source (Emenda 002). FACT entries must
+    carry origin (source + provenance); enforced fail-closed in the service."""
+
+    __tablename__ = "agent_memories"
+
+    id: Mapped[uuid.UUID] = mapped_column(primary_key=True, default=_uuid)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), nullable=False
+    )
+    profile_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("profiles.id"))
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    # Provenance: {"source_type": ..., "source_id": ..., "url": ...,
+    # "recorded_by": ...} — required for FACT (Doc 05: "toda memória
+    # factual deve possuir origem").
+    origin: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    confidence: Mapped[float] = mapped_column(nullable=False, default=0.0)
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="ACTIVE"
+    )
+    superseded_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("agent_memories.id"))
+    created_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+
+    __table_args__ = (
+        Index("ix_agent_memories_workspace", "workspace_id"),
+        Index("ix_agent_memories_kind", "kind"),
+        Index("ix_agent_memories_status", "status"),
     )

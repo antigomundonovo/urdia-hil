@@ -304,3 +304,23 @@ def rights_gate(classification: RightsClassification) -> RightsGateOutcome:
     if classification in BLOCKING_RIGHTS:
         return RightsGateOutcome.BLOCK
     return RightsGateOutcome.MAY_PROCEED
+
+
+class MemoryKind(StrEnum):
+    """Auxiliary memory types (Doc 05 §Memory, V2.2 Hermes)."""
+
+    FACT = "FACT"
+    PREFERENCE = "PREFERENCE"
+    RULE = "RULE"
+    EXPERIENCE = "EXPERIENCE"
+    HYPOTHESIS = "HYPOTHESIS"
+    SKILL = "SKILL"
+
+
+class MemoryStatus(StrEnum):
+    """Lifecycle of an auxiliary memory entry. Superseding archives the old
+    entry (append-only corrections, Doc 08)."""
+
+    ACTIVE = "ACTIVE"
+    SUPERSEDED = "SUPERSEDED"
+    ARCHIVED = "ARCHIVED"

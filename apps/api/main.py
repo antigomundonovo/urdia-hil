@@ -4,10 +4,13 @@ from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from apps.api.analytics_routes import router as analytics_router
+from apps.api.audio_routes import router as audio_router
 from apps.api.auth import require_workspace_access
 from apps.api.auth_routes import router as auth_router
+from apps.api.bridge_routes import router as bridge_router
 from apps.api.content_routes import router as content_router
 from apps.api.jobs_routes import router as jobs_router
+from apps.api.memory_routes import router as memory_router
 from apps.api.opportunities_routes import router as opportunities_router
 from apps.api.profiles_routes import router as profiles_router
 from apps.api.registry_routes import router as registry_router
@@ -35,6 +38,15 @@ app.include_router(sources_router, dependencies=[Depends(require_workspace_acces
 app.include_router(content_router, dependencies=[Depends(require_workspace_access)])
 app.include_router(analytics_router, dependencies=[Depends(require_workspace_access)])
 app.include_router(social_router, dependencies=[Depends(require_workspace_access)])
+# Audio / Music Intelligence (Emenda 014): human session required; the
+# human gate lives in the decision route itself.
+app.include_router(audio_router, dependencies=[Depends(require_workspace_access)])
+# Studio bridge: management routes authenticate the human session themselves;
+# export routes authenticate the machine key themselves (allowlist = this
+# router, Emenda 002).
+app.include_router(bridge_router)
+# Auxiliary memory: enforces workspace membership itself (workspace_id in body).
+app.include_router(memory_router)
 # TikTok connection flow: no session dependency — the OAuth landing uses
 # the short-lived single-use authorization code as credential (local machine).
 app.include_router(tiktok_router)

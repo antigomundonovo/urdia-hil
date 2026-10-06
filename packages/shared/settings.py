@@ -36,6 +36,12 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     frontend_base_url: str = "http://localhost:5173"
 
+    # Music Trend Intelligence (Emenda 014): credenciais de fontes de
+    # tendência. Sem chave, os adapters respondem TREND_SOURCE_UNAVAILABLE
+    # honestamente — nenhum sinal é fabricado. Key nunca logada (Doc 08).
+    youtube_api_key: str = Field(default="", repr=False)
+    youtube_trend_region: str = "BR"
+
     smtp_host: str | None = None
     smtp_port: int = 587
     smtp_username: str | None = None
