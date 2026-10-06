@@ -109,6 +109,32 @@ class PlanDecisionBody(BaseModel):
     reason: str | None = None
 
 
+@router.post("/trends/ingest")
+def ingest_trends(
+    body: dict,
+    workspace_id: uuid.UUID = Query(...),
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+):
+    """Busca sinais de tendência de UMA plataforma (referência §4).
+
+    Fonte sem API oficial conectada responde TREND_SOURCE_UNAVAILABLE
+    honestamente — nenhum sinal é fabricado; TREND SIGNAL ≠ LICENSE.
+    """
+    from packages.research.music_trends import MusicTrendService, TrendError
+
+    platform = (body or {}).get("platform") or ""
+    try:
+        result = MusicTrendService(session).ingest_from_platform(
+            _ctx(workspace_id, current_user.id), platform
+        )
+    except TrendError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    session.commit()
+    return {"platform": result["platform"], "status": result["status"],
+            "ingested": result["ingested"], "detail": result.get("detail")}
+
+
 @router.get("/tracks")
 def list_tracks(
     workspace_id: uuid.UUID = Query(...),
