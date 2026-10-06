@@ -214,3 +214,88 @@ class TestStudioGateway:
             gateway.get_music_plan("plan-1")
         with pytest.raises(StudioGatewayUnavailable):
             gateway.get_music_asset("asset-1")
+
+
+class TestYouTubeAdapter:
+    def test_without_key_is_unavailable(self):
+        """Sem YOUTUBE_API_KEY → UNAVAILABLE honesto (nada fabricado)."""
+        adapter = get_adapters()["youtube"]
+        from packages.providers.trend_sources import TrendSourceUnavailable
+
+        with pytest.raises(TrendSourceUnavailable):
+            adapter.fetch()
+
+    def test_official_api_mapping(self, db, world, monkeypatch):
+        """API oficial (mockada): sinal bruto com dna=None, rights UNKNOWN,
+        popularity normalizada — TREND SIGNAL ≠ LICENSE."""
+        from packages.providers import trend_sources
+
+        payload = {
+            "items": [
+                {
+                    "id": "vid1",
+                    "snippet": {"title": "Hit do momento",
+                                "publishedAt": "2026-10-06T10:00:00Z"},
+                    "statistics": {"viewCount": "900"},
+                },
+                {
+                    "id": "vid2",
+                    "snippet": {"title": "Outro clipe",
+                                "publishedAt": "2026-10-05T10:00:00Z"},
+                    "statistics": {"viewCount": "300"},
+                },
+            ]
+        }
+
+        class FakeResp:
+            status_code = 200
+
+            def json(self):
+                return payload
+
+        monkeypatch.setattr(
+            "packages.shared.settings.get_settings",
+            lambda: type("S", (), {"youtube_api_key": "fake-key",
+                                    "youtube_trend_region": "BR"})(),
+        )
+        monkeypatch.setattr(trend_sources.httpx, "get", lambda *a, **k: FakeResp())
+        signals = list(trend_sources.YouTubeTrendAdapter().fetch())
+        assert len(signals) == 2
+        top = signals[0]
+        assert top.source_platform == "youtube"
+        assert top.music_reference == "Hit do momento"
+        assert top.music_dna is None  # não inventar DNA
+        assert top.rights_state == "UNKNOWN"
+        assert top.components.popularity == 1.0
+        other = signals[1]
+        assert abs(other.components.popularity - 300 / 900) < 1e-9
+
+    def test_ingest_persists_real_signals(self, db, world, monkeypatch):
+        """Ingestão com sinais reais (adapter falso): persiste, audita e
+        mantém rights UNKNOWN — nunca licença automática."""
+        import packages.research.music_trends as mt
+
+        ws, profile = world
+        ctx = ExecutionContext(workspace_id=ws.id, profile_id=profile.id)
+        fake_signals = [
+            _signal(source_platform="youtube"),
+            _signal(source_platform="youtube"),
+        ]
+
+        class FakeAdapter:
+            platform = "youtube"
+
+            def fetch(self):
+                return fake_signals
+
+        monkeypatch.setattr(
+            mt, "get_adapters", lambda: {"youtube": FakeAdapter()}
+        )
+        service = mt.MusicTrendService(db)
+        result = service.ingest_from_platform(ctx, "youtube")
+        assert result["status"] == "OK"
+        assert result["ingested"] == 2
+        rows = service.list_signals(ws.id)
+        assert len(rows) == 2
+        assert all(row.rights_state == "UNKNOWN" for row in rows)
+        assert all(not row.stale for row in rows)
