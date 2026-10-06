@@ -45,6 +45,7 @@ def test_register_verify_login_me_logout_and_revocation(db, monkeypatch):
                 "email": email,
                 "password": "a-strong-test-password",
                 "name": "New User",
+                "accepted_terms": True,
             },
         )
         assert registered.status_code == 202
@@ -66,6 +67,7 @@ def test_register_verify_login_me_logout_and_revocation(db, monkeypatch):
             json={
                 "email": email.upper(),
                 "password": "a-different-test-password",
+                "accepted_terms": True,
             },
         )
         assert duplicate_registration.status_code == registered.status_code
@@ -184,10 +186,92 @@ def test_registration_is_disabled_outside_local_environments(db, monkeypatch):
             json={
                 "email": email,
                 "password": "a-strong-test-password",
+                "accepted_terms": True,
             },
         )
 
         assert response.status_code == 503
+        assert db.query(User).filter_by(email=email).first() is None
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_register_instant_without_smtp_logs_in(db, monkeypatch):
+    """Fluxo padrão de app (dono 2026-10-06): sem SMTP configurado, o
+    cadastro cria a conta verificada, aceita os termos gravados e JÁ
+    LOGA (cookie de sessão) — nada para configurar."""
+    from apps.api import auth_routes
+    from apps.api.auth import require_workspace_access
+    from packages.domain.models import User
+    from packages.shared.settings import Settings
+
+    email = f"instant-{uuid4().hex}@example.test"
+    monkeypatch.setattr(
+        auth_routes,
+        "get_settings",
+        lambda: Settings(app_env="test", smtp_host="", smtp_from_email=""),
+    )
+
+    def override_session():
+        yield db
+
+    app.dependency_overrides.pop(require_workspace_access, None)
+    app.dependency_overrides[get_session] = override_session
+    try:
+        client = TestClient(app)
+        resp = client.post(
+            "/api/v1/auth/register",
+            headers={"Origin": "http://localhost:5173"},
+            json={
+                "email": email,
+                "password": "a-strong-test-password",
+                "name": "Instant User",
+                "accepted_terms": True,
+            },
+        )
+        assert resp.status_code == 200, resp.text
+        payload = resp.json()
+        assert payload.get("workspaces"), "deve logar na hora (contexto completo)"
+        assert "urdia_session" in client.cookies
+        user = db.query(User).filter_by(email=email).first()
+        assert user is not None
+        assert user.email_verified_at is not None  # conta já verificada
+        assert user.terms_accepted_at is not None
+        assert user.terms_version == auth_routes.TERMS_VERSION
+        # /me funciona com o cookie emitido no cadastro
+        assert client.get("/api/v1/auth/me").status_code == 200
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_register_requires_accepted_terms(db, monkeypatch):
+    from apps.api import auth_routes
+    from packages.domain.models import User
+    from packages.shared.settings import Settings
+
+    email = f"terms-{uuid4().hex}@example.test"
+    monkeypatch.setattr(
+        auth_routes,
+        "get_settings",
+        lambda: Settings(app_env="test", smtp_host="", smtp_from_email=""),
+    )
+
+    def override_session():
+        yield db
+
+    app.dependency_overrides[get_session] = override_session
+    try:
+        resp = TestClient(app).post(
+            "/api/v1/auth/register",
+            headers={"Origin": "http://localhost:5173"},
+            json={
+                "email": email,
+                "password": "a-strong-test-password",
+                "accepted_terms": False,
+            },
+        )
+        assert resp.status_code == 422
+        assert "Termos" in resp.json()["detail"]
         assert db.query(User).filter_by(email=email).first() is None
     finally:
         app.dependency_overrides.clear()

@@ -90,11 +90,18 @@ class _LoginLimiter:
 
 login_limiter = _LoginLimiter()
 
+# Versão vigente dos Termos de Uso/Privacidade aceitos no cadastro
+# (publicados em https://antigomundonovo.github.io/terms.html). Novas
+# versões relevantes → atualizar aqui e a data do documento.
+TERMS_VERSION = "terms-v1-2026-10-06"
+
 
 class RegistrationInput(BaseModel):
     email: str = Field(min_length=3, max_length=320)
     password: str = Field(min_length=12, max_length=1024)
     name: str | None = Field(default=None, max_length=255)
+    # Aceitação obrigatória dos Termos de Uso (dono, 2026-10-06)
+    accepted_terms: bool = Field(default=False)
 
     @field_validator("email")
     @classmethod
@@ -279,7 +286,7 @@ def _auth_payload(session: Session, user: User) -> dict:
     }
 
 
-@router.post("/register", status_code=202)
+@router.post("/register")
 def register(
     body: RegistrationInput,
     request: Request,
@@ -287,6 +294,16 @@ def register(
     background_tasks: BackgroundTasks,
     session: Session = Depends(get_session),
 ):
+    """Self-service registration (LOCAL environments only).
+
+    Fluxo padrão de app (dono, 2026-10-06):
+    - COM SMTP configurado → conta criada não-verificada + código/instruções
+      por e-mail (o e-mail confirma que o endereço existe);
+    - SEM SMTP (máquina local) → conta criada, verificada e LOGADA na hora:
+      chegou, criou o acesso, entrou. Nada para configurar.
+    Em ambos, aceitar os Termos de Uso é obrigatório e fica registrado
+    (data + versão) no usuário.
+    """
     require_allowed_origin(request)
     settings = get_settings()
     if settings.app_env.lower() not in {"development", "test"}:
@@ -295,21 +312,32 @@ def register(
             detail="self-registration is disabled outside local environments",
         )
     _rate_limit_request(request, "REGISTER_ACCOUNT")
-    if not settings.smtp_host or not settings.smtp_from_email:
-        raise HTTPException(status_code=503, detail="email verification is not configured")
+    if not body.accepted_terms:
+        raise HTTPException(
+            status_code=422,
+            detail="É preciso aceitar os Termos de Uso e a Política de Privacidade.",
+        )
     response.headers["Cache-Control"] = "no-store"
+    smtp_ready = bool(settings.smtp_host and settings.smtp_from_email)
     user = User(
         email=body.email,
         name=body.name.strip() if body.name and body.name.strip() else body.email.split("@")[0],
         password_hash=PASSWORD_HASHER.hash(body.password),
+        # Sem SMTP não há como enviar código: conta nasce verificada
+        # (o cadastro só existe em ambiente local de qualquer forma).
+        email_verified_at=None if smtp_ready else datetime.now(UTC),
+        terms_accepted_at=datetime.now(UTC),
+        terms_version=TERMS_VERSION,
     )
     workspace = Workspace(name=f"Workspace {uuid4().hex[:12]}")
     session.add_all([user, workspace])
     try:
         session.flush()
-        _, raw_token = _issue_action_token(
-            session, user, VERIFY_EMAIL, VERIFY_TOKEN_LIFETIME
-        )
+        raw_token = None
+        if smtp_ready:
+            _, raw_token = _issue_action_token(
+                session, user, VERIFY_EMAIL, VERIFY_TOKEN_LIFETIME
+            )
         profile = Profile(
             workspace_id=workspace.id,
             key=DEFAULT_PROFILE_KEY,
@@ -330,12 +358,33 @@ def register(
     except IntegrityError:
         session.rollback()
         # Do not disclose whether an email address is already registered.
-        return {"message": "If the account can be created, verification instructions will be sent."}
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(
+            status_code=202,
+            headers={"Cache-Control": "no-store"},
+            content={
+                "message": "If the account can be created, verification instructions will be sent."
+            },
+        )
     session.commit()
+    if not smtp_ready:
+        # Fluxo instantâneo: já entra (cookie de sessão + contexto completo)
+        _new_session(session, user, response)
+        session.commit()
+        return _auth_payload(session, user)
     background_tasks.add_task(
         _deliver_without_disclosing_account_state, body.email, raw_token, VERIFY_EMAIL
     )
-    return {"message": "If the account can be created, verification instructions will be sent."}
+    from fastapi.responses import JSONResponse
+
+    return JSONResponse(
+        status_code=202,
+        headers={"Cache-Control": "no-store"},
+        content={
+            "message": "If the account can be created, verification instructions will be sent."
+        },
+    )
 
 
 @router.post("/verification/request", status_code=202)
