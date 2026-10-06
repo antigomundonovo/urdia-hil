@@ -46,6 +46,10 @@ class CreateContentBody(BaseModel):
     key_message: str | None = None
     seo_entities: list[str] = Field(default_factory=list)
     cta_policy: dict | None = None
+    # Destino EXPLÍCITO (Emenda 014): language_code="pt" +
+    # locale_code="pt-br". Omitido → usa a configuração do perfil.
+    language_code: str | None = None
+    locale_code: str | None = None
 
 
 class DraftBody(BaseModel):
@@ -103,8 +107,16 @@ def create_content(
         key_message=body.key_message,
         seo_entities=body.seo_entities,
         cta_policy=body.cta_policy,
+        language_code=body.language_code,
+        locale_code=body.locale_code,
     )
-    return {"package_id": str(package.id), "format": package.format, "opportunity_state": opp.state}
+    return {
+        "package_id": str(package.id),
+        "format": package.format,
+        "opportunity_state": opp.state,
+        "language_code": package.language_code,
+        "locale_code": package.locale_code,
+    }
 
 
 @router.get("/content/{package_id}")
@@ -169,6 +181,8 @@ def get_content_package(
         "payload": package.payload,
         "created_at": package.created_at.isoformat() if package.created_at else None,
         "opportunity_state": opportunity.state,
+        "language_code": package.language_code,
+        "locale_code": package.locale_code,
         "canonical_content": {
             "factual_core": canonical.factual_core,
             "claims": canonical.claims,

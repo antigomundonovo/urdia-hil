@@ -488,6 +488,42 @@ def _auto_hosted_image_urls(package_id: UUID) -> list[str]:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
+def _stamp_language_and_audio(session, workspace_id, pub, package) -> None:
+    """Contrato de idioma + resultado de áudio HONESTO (Emenda 014).
+
+    Idioma: copiado do package (nunca da plataforma). Áudio: as APIs do
+    TikTok/Instagram NÃO aceitam anexar trilha no upload — se havia plano
+    aprovado com música, registra audio_applied=False com o motivo; nunca
+    fingir que a música foi aplicada. Trilha só no kit de export manual.
+    """
+    pub.language_code = package.language_code
+    pub.locale_code = package.locale_code
+    pub.target_language_code = package.target_language_code
+    pub.target_locale_code = package.target_locale_code
+    from packages.research.audio import AudioService
+
+    plan = AudioService(session).approved_plan(workspace_id, package.id)
+    if plan is None:
+        return
+    pub.audio_mode = plan.audio_mode
+    if plan.audio_mode == "NONE":
+        pub.audio_applied = False
+        pub.audio_detail = {"note": "plano aprovado sem música (decisão humana)"}
+        return
+    has_music = bool((plan.layers or {}).get("music"))
+    pub.audio_applied = False
+    pub.audio_detail = {
+        "rights_state": plan.rights_state,
+        "music": (plan.layers or {}).get("music"),
+        "applied_reason": (
+            "PLATFORM_API_NOT_SUPPORTED: a API da plataforma não anexa trilha"
+            " no upload — use o kit de exportação manual (trilha incluída)"
+            if has_music
+            else "NO_CANDIDATE: nenhuma música validada no plano"
+        ),
+    }
+
+
 class PublishBody(BaseModel):
     profile_id: UUID
     public_image_urls: list[str] = Field(default_factory=list)
@@ -578,6 +614,7 @@ def publish_via_api(
         pub.status = "PROCESSING"
         pub.method = "API"
         pub.remote_id = result.publish_id
+        _stamp_language_and_audio(session, workspace_id, pub, package)
         append_audit(
             session,
             ctx=ExecutionContext(
@@ -652,6 +689,7 @@ def publish_via_api(
     pub.method = "API"
     pub.published_at = datetime.now(UTC)
     pub.remote_id = result.remote_id
+    _stamp_language_and_audio(session, workspace_id, pub, package)
     append_audit(
         session,
         ctx=ExecutionContext(

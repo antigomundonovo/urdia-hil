@@ -191,6 +191,8 @@ def export_audience_demand(
             "editorial_fit": d.editorial_fit,
             "decision": d.decision,
             "decided_at": d.decided_at.isoformat() if d.decided_at else None,
+            "language_code": d.language_code,
+            "locale_code": d.locale_code,
             "created_at": d.created_at.isoformat() if d.created_at else None,
         }
         for d in demands

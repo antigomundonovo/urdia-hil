@@ -440,8 +440,21 @@ class SocialIntelligenceService:
         evidence: dict | None = None,
     ):
         from packages.domain.social import AudienceDemand
+        from packages.multilingual import LanguageError, normalize_language_tag
 
         self._require_profile(ctx)
+        # Idioma da demanda (Emenda 014): herda da configuração editorial
+        # do perfil — nunca da plataforma.
+        language_code = None
+        locale_code = None
+        profile = self.session.get(Profile, ctx.profile_id)
+        if profile is not None:
+            language_code, locale_code = profile.language_code, profile.locale_code
+            if not language_code and profile.language:
+                try:
+                    language_code, locale_code = normalize_language_tag(profile.language)
+                except LanguageError:
+                    pass
         demand = AudienceDemand(
             workspace_id=ctx.workspace_id,
             profile_id=ctx.profile_id,
@@ -453,6 +466,8 @@ class SocialIntelligenceService:
             platforms=platforms,
             confidence=0.0,
             editorial_fit=0.0,
+            language_code=language_code,
+            locale_code=locale_code,
         )
         self.session.add(demand)
         self.session.flush()
@@ -477,6 +492,8 @@ class SocialIntelligenceService:
             "unique_people_count": demand.unique_people_count,
             "growth": demand.growth,
             "engagement": demand.engagement,
+            "language_code": demand.language_code,
+            "locale_code": demand.locale_code,
             "platforms": demand.platforms,
             "confidence": demand.confidence,
             "editorial_fit": demand.editorial_fit,

@@ -116,6 +116,10 @@ class AudienceDemand(Base):
     )
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     decided_by: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("users.id"))
+    # Idioma da audiência/demanda (Emenda 014): herda do perfil na
+    # detecção; a ponte exporta read-only para o Studio.
+    language_code: Mapped[str | None] = mapped_column(String(8))
+    locale_code: Mapped[str | None] = mapped_column(String(16))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

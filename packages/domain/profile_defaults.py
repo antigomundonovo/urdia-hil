@@ -7,6 +7,10 @@ legacy compatibility profile for existing History Intelligence Layer workspaces.
 DEFAULT_PROFILE_KEY = "default"
 DEFAULT_EDITORIAL_POLICY: dict = {
     "language": "pt-BR",
+    # Contrato canônico (Emenda 014): language_code + locale_code. É a
+    # configuração editorial EXPLÍCITA do perfil — não fallback silencioso.
+    "language_code": "pt",
+    "locale_code": "pt-br",
     "audience": "Brasil",
     "editorial_style": "acessível + claro + documental",
     "image_first": True,

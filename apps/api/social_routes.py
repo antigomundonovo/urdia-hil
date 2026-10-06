@@ -289,6 +289,8 @@ def list_audience_demand(
             "growth": d.growth,
             "confidence": d.confidence,
             "decision": d.decision,
+            "language_code": d.language_code,
+            "locale_code": d.locale_code,
         }
         for d in demands
     ]

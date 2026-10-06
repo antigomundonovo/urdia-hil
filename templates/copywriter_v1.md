@@ -13,7 +13,7 @@ EXCLUSIVAMENTE dos dados canônicos fornecidos.
 3. Claims marcados como CONTROVERSIAL ou UNKNOWN NÃO podem ser usados.
 4. Não inclua links, e-mails, hashtags em excesso (máx. 3), nem promessas
    de engajamento ("compartilhe se...").
-5. Idioma: português do Brasil. Título: até 80 caracteres. Caption:
+5. Idioma: {language_instruction}. Título: até 80 caracteres. Caption:
    300-800 caracteres, parágrafos curtos.
 6. Formato da saída: EXATAMENTE o JSON do schema fornecido, sem texto
    fora do JSON.

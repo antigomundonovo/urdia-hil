@@ -142,7 +142,11 @@ class Profile(Base, TimestampMixin):
     )
     key: Mapped[str] = mapped_column(String(64), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Legado (formato livre, ex. "pt-BR"). Contrato canônico (Emenda 014):
+    # language_code + locale_code.
     language: Mapped[str | None] = mapped_column(String(16))
+    language_code: Mapped[str | None] = mapped_column(String(8))
+    locale_code: Mapped[str | None] = mapped_column(String(16))
     audience_region: Mapped[str | None] = mapped_column(String(64))
     editorial_policy: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     visual_identity: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
@@ -299,7 +303,11 @@ class Source(Base, TimestampMixin):
     source_type: Mapped[str] = mapped_column(String(32), nullable=False)
     publication_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     event_proximity: Mapped[str | None] = mapped_column(String(32))
+    # Idioma da FONTE (legado + contrato canônico, Emenda 014). Não é o
+    # idioma do conteúdo de destino — esse vive em canonical_contents etc.
     language: Mapped[str | None] = mapped_column(String(16))
+    language_code: Mapped[str | None] = mapped_column(String(8))
+    locale_code: Mapped[str | None] = mapped_column(String(16))
     jurisdiction: Mapped[str | None] = mapped_column(String(64))
     access_type: Mapped[str | None] = mapped_column(String(32))
     archive_status: Mapped[str | None] = mapped_column(String(32))

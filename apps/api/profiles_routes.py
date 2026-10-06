@@ -28,6 +28,8 @@ def list_profiles(
                 "key": p.key,
                 "name": p.name,
                 "language": p.language,
+                "language_code": p.language_code,
+                "locale_code": p.locale_code,
                 "status": p.status,
             }
             for p in rows

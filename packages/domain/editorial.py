@@ -148,6 +148,10 @@ class CanonicalContent(Base):
     visual_assets: Mapped[list[Any] | None] = mapped_column(JSONB)
     cta_policy: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     seo_entities: Mapped[list[Any] | None] = mapped_column(JSONB)
+    # Contrato de idioma (Emenda 014): idioma do CONTEÚDO canônico —
+    # dimensão do conteúdo, nunca da plataforma.
+    language_code: Mapped[str | None] = mapped_column(String(8))
+    locale_code: Mapped[str | None] = mapped_column(String(16))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -166,6 +170,15 @@ class ContentPackage(Base):
     )
     format: Mapped[str] = mapped_column(String(32), nullable=False)
     payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    # Copiado do conteúdo canônico na criação (propagação Emenda 014).
+    language_code: Mapped[str | None] = mapped_column(String(8))
+    locale_code: Mapped[str | None] = mapped_column(String(16))
+    # SOURCE ≠ TARGET (referência MusicIntelligence §47): até existir
+    # adaptação real, target = language_code/locale_code e source fica NULL.
+    source_language_code: Mapped[str | None] = mapped_column(String(8))
+    source_locale_code: Mapped[str | None] = mapped_column(String(16))
+    target_language_code: Mapped[str | None] = mapped_column(String(8))
+    target_locale_code: Mapped[str | None] = mapped_column(String(16))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -181,6 +194,10 @@ class PlatformVariant(Base):
     )
     platform: Mapped[str] = mapped_column(String(64), nullable=False)
     payload: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    # O formato pode mudar por plataforma; o idioma NÃO muda
+    # automaticamente (Emenda 014) — copiado do package.
+    language_code: Mapped[str | None] = mapped_column(String(8))
+    locale_code: Mapped[str | None] = mapped_column(String(16))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

@@ -42,9 +42,14 @@ from packages.domain.enums import (
     UncertaintyState,
 )
 from packages.domain.knowledge import Claim, EvidenceRecord
-from packages.domain.models import AuditEvent, Source
+from packages.domain.models import AuditEvent, Profile, Source
 from packages.domain.repositories import AuditRepository
 from packages.governance.audit import append_audit
+from packages.multilingual import (
+    LanguageError,
+    normalize_language_pair,
+    normalize_language_tag,
+)
 from packages.providers.platform_catalog import get_declared, posting_method
 from packages.research.opportunity import OpportunityService
 from packages.research.rights import rights_gate
@@ -299,6 +304,37 @@ class ContentService:
 
     # --- canonical → package → draft ---------------------------------------
 
+    def resolve_content_language(
+        self,
+        ctx: ExecutionContext,
+        *,
+        language_code: str | None = None,
+        locale_code: str | None = None,
+    ) -> tuple[str, str | None]:
+        """Contrato de idioma (Emenda 014 §3/§7): destino EXPLÍCITO > perfil
+        (configuração editorial) > default editorial documentado. Nunca
+        deduzido da plataforma; erro explícito em valor inválido."""
+        if language_code:
+            try:
+                return normalize_language_pair(language_code, locale_code)
+            except LanguageError as exc:
+                raise PublicationBlocked(f"idioma inválido: {exc}") from exc
+        if ctx.profile_id:
+            profile = self.session.get(Profile, ctx.profile_id)
+            if profile is not None:
+                if profile.language_code:
+                    return profile.language_code, profile.locale_code
+                if profile.language:
+                    try:
+                        return normalize_language_tag(profile.language)
+                    except LanguageError:
+                        pass  # legado não parseável: segue para o default
+        from packages.domain.profile_defaults import DEFAULT_EDITORIAL_POLICY
+
+        return DEFAULT_EDITORIAL_POLICY["language_code"], DEFAULT_EDITORIAL_POLICY[
+            "locale_code"
+        ]
+
     def create_content(
         self,
         ctx: ExecutionContext,
@@ -307,9 +343,16 @@ class ContentService:
         format: ContentFormat,
         **canonical_fields,
     ) -> ContentPackage:
+        language_code, locale_code = self.resolve_content_language(
+            ctx,
+            language_code=canonical_fields.pop("language_code", None),
+            locale_code=canonical_fields.pop("locale_code", None),
+        )
         canonical = CanonicalContent(
             workspace_id=ctx.workspace_id,
             opportunity_id=opp.id,
+            language_code=language_code,
+            locale_code=locale_code,
             **canonical_fields,
         )
         self.session.add(canonical)
@@ -319,6 +362,10 @@ class ContentService:
             opportunity_id=opp.id,
             canonical_content_id=canonical.id,
             format=format.value,
+            language_code=language_code,
+            locale_code=locale_code,
+            target_language_code=language_code,
+            target_locale_code=locale_code,
         )
         self.session.add(package)
         self.session.flush()
@@ -772,6 +819,83 @@ class ContentService:
 
     # --- manual posting kit (Doc 14: MANUAL platforms) --------------------------
 
+    def _audio_export_block(
+        self, ctx: ExecutionContext, package: ContentPackage, platform: str, export_dir: Path
+    ) -> dict[str, Any] | None:
+        """Bloco de áudio HONESTO para manifest/publication (Emenda 014 §31).
+
+        Sem plano aprovado → None (conteúdo funciona sem música). Com plano
+        aprovado, valida os direitos DE NOVO no momento do export (licença
+        pode ter expirado); a trilha é copiada para o KIT (postagem manual)
+        e `applied` significa "trilha incluída no kit". A integração por API
+        não aplica trilha hoje — isso é registrado na publicação, nunca
+        fingido.
+        """
+        from packages.providers.music import get_music_provider
+        from packages.research.audio import AudioService
+
+        plan = AudioService(self.session).approved_plan(ctx.workspace_id, package.id)
+        if plan is None:
+            return None
+        music = dict((plan.layers or {}).get("music") or {})
+        block: dict[str, Any] = {
+            "mode": plan.audio_mode,
+            "rights_state": plan.rights_state,
+            "applied": False,
+            "note": None,
+            "music": music or None,
+        }
+        track_id = music.get("track_id")
+        if not track_id:
+            return block
+        from packages.domain.audio import MusicTrack
+
+        track = self.session.get(MusicTrack, UUID(str(track_id)))
+        if track is None:
+            block["rights_state"] = "NO_CANDIDATE"
+            block["note"] = "MUSIC_ASSET_NOT_FOUND: track do plano não está no catálogo"
+            block["music"] = None
+            return block
+        ok, reason = get_music_provider().validate_usage(track, platform=platform)
+        append_audit(
+            self.session,
+            ctx=ctx,
+            action="MUSIC_RIGHTS_BLOCKED" if not ok else "MUSIC_RIGHTS_VALIDATED",
+            entity_type="music_track",
+            entity_id=track.id,
+            previous_state=track.rights_state,
+            new_state=reason if not ok else "OK",
+            reason=f"export {package.id} → {platform}",
+        )
+        if not ok:
+            block["rights_state"] = reason
+            block["note"] = (
+                f"música removida do export por direitos ({reason}) — conteúdo vai sem música"
+            )
+            block["music"] = None
+            return block
+        if track.storage_path:
+            from packages.shared.settings import get_settings
+
+            asset_root = Path(get_settings().asset_root).resolve()
+            source_path = (asset_root / track.storage_path).resolve()
+            if source_path.is_relative_to(asset_root) and source_path.is_file():
+                audio_dir = export_dir / "audio"
+                audio_dir.mkdir(parents=True, exist_ok=True)
+                dest = audio_dir / source_path.name
+                dest.write_bytes(source_path.read_bytes())
+                block["track_file"] = f"audio/{source_path.name}"
+                block["applied"] = True  # trilha incluída no kit (postagem manual)
+            else:
+                block["note"] = (
+                    "arquivo da trilha não encontrado no asset root — "
+                    "metadados incluídos, áudio não"
+                )
+        else:
+            block["note"] = "track sem arquivo local — metadados incluídos no kit"
+            block["applied"] = True
+        return block
+
     def _write_manual_posting_kit(
         self,
         *,
@@ -784,6 +908,7 @@ class ContentService:
         sources: list[Source],
         publication_id,
         approved_by,
+        audio_block: dict[str, Any] | None = None,
     ) -> None:
         """For platforms without an official posting API (Doc 14 MANUAL,
         e.g. Kwai): generate a complete manual-posting kit — everything a
@@ -854,6 +979,31 @@ Confirme no sistema:
         kit_dir = export_dir / "platform_variants" / platform
         kit_dir.mkdir(parents=True, exist_ok=True)
         (kit_dir / "MANUAL_POSTING.md").write_text(kit, encoding="utf-8")
+        if audio_block and audio_block.get("applied"):
+            music = audio_block.get("music") or {}
+            track_file = audio_block.get("track_file")
+            attribution = (
+                "\n- ATRIBUIÇÃO OBRIGATÓRIA: inclua os créditos na legenda."
+                if music.get("attribution_required")
+                else ""
+            )
+            file_line = (
+                f"- Arquivo da trilha incluído neste pacote: `{track_file}`"
+                if track_file
+                else "- Arquivo não incluído — use a música pelo app da plataforma."
+            )
+            kit += f"""
+
+## Trilha sonora (Emenda 014 — licença {audio_block.get("rights_state", "N/D")})
+Música sugerida: **{music.get("title", "N/D")}** — {music.get("artist") or "artista N/D"}
+- Trecho: {music.get("start_time", 0)}s → {music.get("end_time", "?")}s
+- Volume {music.get("volume", 0.2)} · fade-in {music.get("fade_in_seconds", 0)}s
+- Fade-out {music.get("fade_out_seconds", 0)}s
+{file_line}{attribution}
+Se o app não permitir usar esta trilha, publique SEM música — nunca
+substitua por música sem licença registrada.
+"""
+            (kit_dir / "MANUAL_POSTING.md").write_text(kit, encoding="utf-8")
 
     # --- export (Doc 13) -------------------------------------------------------
 
@@ -1111,6 +1261,9 @@ Confirme no sistema:
             content_package_id=package.id,
             platform=platform,
             payload={"exported_from": "V1 manual export"},
+            # formato pode variar por plataforma; idioma NÃO (Emenda 014)
+            language_code=package.language_code,
+            locale_code=package.locale_code,
         )
         self.session.add(variant)
         render_block = self._render_outputs(
@@ -1122,6 +1275,9 @@ Confirme no sistema:
             exported_assets=exported_assets,
             export_dir=export_dir,
         )
+        # Plano de áudio aprovado entra no manifest e no kit (Emenda 014);
+        # sem plano aprovado, o conteúdo funciona sem música.
+        audio_block = self._audio_export_block(ctx, package, platform, export_dir)
         manifest = {
             "package_id": str(package.id),
             "opportunity_id": str(opp.id),
@@ -1135,7 +1291,11 @@ Confirme no sistema:
             "assets": exported_assets,
             "source_count": len(sources),
             "claim_count": len(used_claims),
+            "language_code": package.language_code,
+            "locale_code": package.locale_code,
         }
+        if audio_block is not None:
+            manifest["audio"] = audio_block
         if render_block is not None:
             manifest["render"] = render_block
         (export_dir / "manifest.json").write_text(
@@ -1161,6 +1321,13 @@ Confirme no sistema:
                 status="PENDING",
                 idempotency_key=f"{opp.profile_id}:{package.id}:{platform}:v1",
                 approved_by=ctx.actor_id,
+                language_code=package.language_code,
+                locale_code=package.locale_code,
+                target_language_code=package.target_language_code,
+                target_locale_code=package.target_locale_code,
+                audio_mode=audio_block["mode"] if audio_block else None,
+                audio_applied=audio_block["applied"] if audio_block else None,
+                audio_detail=audio_block if audio_block else None,
             )
             self.session.add(publication)
         self.session.flush()
@@ -1176,6 +1343,7 @@ Confirme no sistema:
                 sources=sources,
                 publication_id=publication_record.id,
                 approved_by=ctx.actor_id,
+                audio_block=audio_block,
             )
         append_audit(
             self.session,

@@ -58,12 +58,22 @@ class BenchCase:
     sources: list[tuple[str, str]]  # (reference, text) p/ originalidade
 
     def context(self) -> dict[str, Any]:
+        from packages.domain.profile_defaults import DEFAULT_EDITORIAL_POLICY
+        from packages.multilingual import describe_pair
+
+        # O corpus de benchmark é o dataset histórico em português —
+        # idioma EXPLÍTITO do contrato (Emenda 014), não dedução.
+        language_instruction = describe_pair(
+            DEFAULT_EDITORIAL_POLICY["language_code"],
+            DEFAULT_EDITORIAL_POLICY["locale_code"],
+        )
         return {
             "opportunity_title": self.opportunity_title,
             "editorial_angle": self.editorial_angle,
             "key_message": self.key_message,
             "format": "PHOTO_POST",
             "claims": self.claims,
+            "language_instruction": language_instruction,
         }
 
 
