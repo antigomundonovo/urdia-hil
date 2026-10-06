@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { api } from "../api";
+import { api, API_URL } from "../api";
 import { useProfile } from "../profile";
 
 interface InboxItem {
@@ -590,6 +590,38 @@ interface BridgeClient {
   created_at: string | null;
 }
 
+function CopyRow({ label, value, emphasis }: { label: string; value: string; emphasis?: boolean }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+    } catch {
+      // clipboard can be blocked (older browser/permission) — select fallback
+      const ta = document.createElement("textarea");
+      ta.value = value;
+      document.body.append(ta);
+      ta.select();
+      document.execCommand("copy");
+      ta.remove();
+    }
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1500);
+  };
+  return (
+    <div className="flex items-center gap-2">
+      <span className="w-40 shrink-0 text-stone-500">{label}:</span>
+      <code className={`break-all ${emphasis ? "font-semibold text-amber-900" : "text-stone-800"}`}>{value}</code>
+      <button
+        onClick={copy}
+        title={`Copiar ${label.toLowerCase()}`}
+        className="shrink-0 rounded border border-stone-300 bg-white px-2 py-0.5 text-[11px] font-medium text-stone-700 hover:bg-stone-100"
+      >
+        {copied ? "copiado ✓" : "copiar"}
+      </button>
+    </div>
+  );
+}
+
 function BridgeCard({ card }: { card: string }) {
   const { workspaceId } = useProfile();
   const queryClient = useQueryClient();
@@ -645,6 +677,17 @@ function BridgeCard({ card }: { card: string }) {
         audiência (nada publica, nada apaga). Crie uma chave, entregue ao
         Studio, e revogue se desconfiar de qualquer coisa.
       </p>
+      {workspaceId && (
+        <div className="mt-3 rounded border border-stone-200 bg-stone-50 p-3">
+          <p className="text-xs font-medium text-stone-700">
+            Dados de conexão (copie para a tela “Conectar ao HIL” do Studio):
+          </p>
+          <div className="mt-2 space-y-1 text-xs">
+            <CopyRow label="URL da API do HIL" value={API_URL} />
+            <CopyRow label="Workspace ID do HIL" value={workspaceId} />
+          </div>
+        </div>
+      )}
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <button
           onClick={() => create.mutate("URDIA Studio")}
@@ -659,7 +702,8 @@ function BridgeCard({ card }: { card: string }) {
           <p className="text-xs font-medium text-amber-900">
             Copie a chave agora (não será mostrada de novo):
           </p>
-          <code className="mt-1 block break-all text-sm">{newKey}</code>
+          <CopyRow label="Chave de acesso" value={newKey} emphasis />
+
         </div>
       )}
       <div className="mt-4 space-y-2">
