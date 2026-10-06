@@ -33,6 +33,7 @@ interface AudienceDemand {
   unique_people_count: number;
   growth: string | null;
   confidence: string | null;
+  decision: string;
 }
 
 interface AudiencePulse {
@@ -138,6 +139,23 @@ export default function Social() {
     onSuccess: () => {
       setMessage("Veredito humano registrado — esta é a resolução oficial do desafio.");
       invalidate();
+    },
+    onError: (e) => setMessage((e as Error).message),
+  });
+
+  const decideDemand = useMutation({
+    mutationFn: ({ demandId, decision, reason }: { demandId: string; decision: string; reason?: string }) =>
+      api.post(
+        `/api/v1/social/audience/demand/${demandId}/decision?workspace_id=${workspaceId}`,
+        { profile_id: profile?.id, decision, reason: reason || undefined }
+      ),
+    onSuccess: (_d, vars) => {
+      setMessage(
+        vars.decision === "APPROVED"
+          ? "Demanda aprovada — o Studio já enxerga esta decisão."
+          : "Demanda rejeitada — o Studio já enxerga esta decisão."
+      );
+      queryClient.invalidateQueries({ queryKey: ["social-demand"] });
     },
     onError: (e) => setMessage((e as Error).message),
   });
@@ -302,15 +320,14 @@ export default function Social() {
         </h3>
         <ul className="mt-3 space-y-3">
           {(demand.data ?? []).map((d) => (
-            <li key={d.id} className="flex items-center justify-between gap-4 border-b border-stone-100 pb-3">
-              <div>
-                <p className="text-sm text-stone-800">{d.summary}</p>
-                <span className="text-xs text-stone-400">
-                  {d.unique_people_count} pessoa(s) · confiança {d.confidence ?? "—"}
-                  {d.growth ? ` · tendência ${d.growth}` : ""}
-                </span>
-              </div>
-            </li>
+            <DemandRow
+              key={d.id}
+              demand={d}
+              busy={decideDemand.isPending}
+              onDecide={(decision, reason) =>
+                decideDemand.mutate({ demandId: d.id, decision, reason })
+              }
+            />
           ))}
           {demand.data?.length === 0 && (
             <li className="text-sm text-stone-400">Sem demanda mapeada ainda.</li>
@@ -334,6 +351,109 @@ export default function Social() {
         </div>
       </section>
     </div>
+  );
+}
+
+function DemandRow({
+  demand,
+  onDecide,
+  busy,
+}: {
+  demand: AudienceDemand;
+  onDecide: (decision: string, reason?: string) => void;
+  busy: boolean;
+}) {
+  const [rejecting, setRejecting] = useState(false);
+  const [reason, setReason] = useState("");
+  const [changing, setChanging] = useState(false);
+  const pending = demand.decision === "PENDING" || changing;
+
+  return (
+    <li className="border-b border-stone-100 pb-3">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <p className="text-sm text-stone-800">{demand.summary}</p>
+          <span className="text-xs text-stone-400">
+            {demand.unique_people_count} pessoa(s) · confiança {demand.confidence ?? "—"}
+            {demand.growth ? ` · tendência ${demand.growth}` : ""}
+          </span>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {demand.decision === "APPROVED" && !changing && (
+            <span className="rounded bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800">
+              Aprovada por você ✓
+            </span>
+          )}
+          {demand.decision === "REJECTED" && !changing && (
+            <span className="rounded bg-red-100 px-2 py-0.5 text-xs font-medium text-red-800">
+              Rejeitada por você
+            </span>
+          )}
+          {demand.decision !== "PENDING" && !changing && (
+            <button
+              onClick={() => setChanging(true)}
+              disabled={busy}
+              className="rounded border border-stone-300 px-3 py-1.5 text-xs font-medium hover:bg-stone-50 disabled:opacity-40"
+            >
+              Mudar
+            </button>
+          )}
+          {pending && !rejecting && (
+            <>
+              <button
+                onClick={() => {
+                  onDecide("APPROVED");
+                  setChanging(false);
+                }}
+                disabled={busy}
+                className="rounded bg-green-700 px-3 py-1.5 text-xs font-medium text-white hover:bg-green-800 disabled:opacity-40"
+              >
+                Aprovar
+              </button>
+              <button
+                onClick={() => setRejecting(true)}
+                disabled={busy}
+                className="rounded border border-red-300 px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-40"
+              >
+                Rejeitar…
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+      {pending && rejecting && (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <input
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="motivo da rejeição (opcional)"
+            className="w-64 rounded border border-stone-300 px-3 py-1.5 text-xs"
+          />
+          <button
+            onClick={() => {
+              onDecide("REJECTED", reason || undefined);
+              setRejecting(false);
+              setChanging(false);
+              setReason("");
+            }}
+            disabled={busy}
+            className="rounded bg-stone-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-stone-700 disabled:opacity-40"
+          >
+            Confirmar rejeição
+          </button>
+          <button
+            onClick={() => {
+              setRejecting(false);
+              setChanging(false);
+              setReason("");
+            }}
+            className="rounded border border-stone-300 px-3 py-1.5 text-xs font-medium hover:bg-stone-50"
+          >
+            Cancelar
+          </button>
+        </div>
+      )}
+    </li>
   );
 }
 
