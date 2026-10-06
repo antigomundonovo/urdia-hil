@@ -65,7 +65,7 @@ export default function Audio() {
 
   const trends = useMutation({
     mutationFn: (platform: string) =>
-      api.post<{ status: string; detail?: string; ingested: number }>(
+      api.post<{ platform: string; status: string; detail?: string; ingested: number }>(
         `/api/v1/audio/trends/ingest?workspace_id=${workspaceId}`,
         { platform }
       ),
