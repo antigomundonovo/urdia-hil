@@ -253,6 +253,39 @@ class TestRecommendAndGate:
         assert plan.audio_mode == "NONE"
 
 
+class TestTrackFileUpload:
+    def test_upload_saves_file_with_hash(self, client, db, world, actor, tmp_path, monkeypatch):
+
+        ws, _profile = world
+        track = _track(db, world)
+        monkeypatch.setattr(
+            "apps.api.audio_routes.get_settings",
+            lambda: type("S", (), {"asset_root": str(tmp_path)})(),
+        )
+        resp = client.post(
+            f"/api/v1/audio/tracks/{track.id}/file?workspace_id={ws.id}",
+            files={"file": ("trilha.mp3", b"ID3" + bytes(128), "audio/mpeg")},
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["storage_path"].startswith("music/")
+        assert data["bytes"] == 131
+        db.refresh(track)
+        assert track.storage_path == data["storage_path"]
+        assert track.file_hash == data["sha256"]
+        assert (tmp_path / data["storage_path"]).is_file()
+
+    def test_upload_rejects_bad_format(self, client, db, world, actor):
+        ws, _profile = world
+        track = _track(db, world)
+        resp = client.post(
+            f"/api/v1/audio/tracks/{track.id}/file?workspace_id={ws.id}",
+            files={"file": ("notas.txt", b"oi", "text/plain")},
+        )
+        assert resp.status_code == 422
+        assert "formato" in resp.json()["detail"]
+
+
 class TestAudioApi:
     def test_suggest_and_decide_flow(self, client, db, world, actor):
         from packages.domain.editorial import CanonicalContent, ContentPackage

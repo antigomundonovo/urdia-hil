@@ -4,22 +4,31 @@ Catálogo de músicas + plano de áudio com PORTÃO HUMANO. Nada publica;
 a decisão é sempre de humano logado (coerente com Emenda 007).
 """
 
+import hashlib
 import uuid
+from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from apps.api.auth import get_current_user
 from packages.domain.audio import AudioPlan, MusicTrack
 from packages.domain.models import User
+from packages.governance.audit import append_audit
 from packages.multilingual import LanguageError, normalize_language_tag
 from packages.research.audio import AudioError, AudioService
 from packages.shared.db import get_session
 from packages.shared.execution_context import ExecutionContext
+from packages.shared.settings import get_settings
 
 router = APIRouter(prefix="/api/v1/audio", tags=["audio"])
+
+# Formatos de áudio aceitos no catálogo (arquivo é representação física;
+# a entidade rastreável é o MusicTrack)
+ALLOWED_AUDIO_EXTENSIONS = {".mp3", ".wav", ".m4a", ".ogg", ".flac"}
+MAX_AUDIO_BYTES = 20_000_000  # 20 MB
 
 
 def _ctx(workspace_id: uuid.UUID, actor_id) -> ExecutionContext:
@@ -169,6 +178,60 @@ def register_track(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     session.commit()
     return _track_out(track)
+
+
+@router.post("/tracks/{track_id}/file")
+async def upload_track_file(
+    track_id: uuid.UUID,
+    workspace_id: uuid.UUID = Query(...),
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+    file: UploadFile = File(...),
+):
+    """Anexa o arquivo de áudio a uma track do catálogo.
+
+    O arquivo é a representação física; a entidade rastreável é a
+    MusicTrack (referência §24). Salvo sob ASSET_ROOT/music/ com hash
+    sha256 registrado — caminho relativo, sem travessia (Doc 08).
+    """
+    track = session.get(MusicTrack, track_id)
+    if track is None or track.workspace_id != workspace_id:
+        raise HTTPException(status_code=404, detail="track not found")
+    ext = Path(file.filename or "").suffix.lower()
+    if ext not in ALLOWED_AUDIO_EXTENSIONS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"formato não suportado: {ext or '(sem extensão)'} — "
+            f"aceitos: {', '.join(sorted(ALLOWED_AUDIO_EXTENSIONS))}",
+        )
+    content = await file.read()
+    if len(content) > MAX_AUDIO_BYTES:
+        raise HTTPException(status_code=422, detail="arquivo maior que 20 MB")
+    if not content:
+        raise HTTPException(status_code=422, detail="arquivo vazio")
+
+    asset_root = Path(get_settings().asset_root).resolve()
+    music_dir = asset_root / "music"
+    music_dir.mkdir(parents=True, exist_ok=True)
+    dest = music_dir / f"{track_id}{ext}"
+    dest.write_bytes(content)
+
+    previous = track.storage_path
+    track.storage_path = f"music/{dest.name}"
+    track.file_hash = hashlib.sha256(content).hexdigest()
+    append_audit(
+        session,
+        ctx=_ctx(workspace_id, current_user.id),
+        action="MUSIC_TRACK_FILE_UPLOADED",
+        entity_type="music_track",
+        entity_id=track.id,
+        previous_state=previous,
+        new_state=track.storage_path,
+        metadata={"sha256": track.file_hash, "bytes": len(content)},
+    )
+    session.commit()
+    return {"id": str(track.id), "storage_path": track.storage_path,
+            "sha256": track.file_hash, "bytes": len(content)}
 
 
 @router.post("/tracks/{track_id}/status")

@@ -16,6 +16,7 @@ interface MusicTrack {
   license_notes: string | null;
   attribution_required: boolean | null;
   allowed_platforms: string[] | null;
+  storage_path: string | null;
   rights_state: string;
 }
 
@@ -118,6 +119,22 @@ export default function Audio() {
       }),
     onSuccess: () => {
       setMessage("Estado de direitos atualizado.");
+      void queryClient.invalidateQueries({ queryKey: ["audio-tracks"] });
+    },
+    onError: (e) => setMessage((e as Error).message),
+  });
+
+  const uploadFile = useMutation({
+    mutationFn: ({ id, file }: { id: string; file: File }) => {
+      const body = new FormData();
+      body.append("file", file);
+      return api.post<{ storage_path: string }>(
+        `/api/v1/audio/tracks/${id}/file?workspace_id=${workspaceId}`,
+        body
+      );
+    },
+    onSuccess: () => {
+      setMessage("Áudio anexado — ele entra no kit de exportação.");
       void queryClient.invalidateQueries({ queryKey: ["audio-tracks"] });
     },
     onError: (e) => setMessage((e as Error).message),
@@ -258,6 +275,25 @@ export default function Audio() {
                 </p>
               </div>
               <div className="flex items-center gap-2">
+                {t.storage_path ? (
+                  <span className="rounded bg-stone-100 px-2 py-0.5 text-xs text-stone-600">
+                    áudio anexado ✓
+                  </span>
+                ) : (
+                  <label className="cursor-pointer rounded border border-stone-300 px-2 py-1 text-xs font-medium text-stone-700 hover:bg-stone-50">
+                    {uploadFile.isPending ? "anexando…" : "anexar áudio"}
+                    <input
+                      type="file"
+                      accept=".mp3,.wav,.m4a,.ogg,.flac"
+                      className="hidden"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) uploadFile.mutate({ id: t.id, file: f });
+                        e.target.value = "";
+                      }}
+                    />
+                  </label>
+                )}
                 <span
                   className={`rounded px-2 py-0.5 text-xs font-medium ${
                     RIGHTS_TONE[t.rights_state] ?? "bg-stone-100 text-stone-600"
