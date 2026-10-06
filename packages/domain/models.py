@@ -41,6 +41,10 @@ class User(Base, TimestampMixin):
     email: Mapped[str | None] = mapped_column(String(320))
     password_hash: Mapped[str | None] = mapped_column(String(512))
     email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Aceitação dos Termos de Uso (dono, 2026-10-06): quando e qual versão
+    # foi aceita no cadastro. NULL = aceitou antes deste campo existir.
+    terms_accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    terms_version: Mapped[str | None] = mapped_column(String(32))
 
     __table_args__ = (UniqueConstraint("email", name="uq_users_email"),)
 

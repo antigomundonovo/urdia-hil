@@ -11,6 +11,7 @@ export default function Auth() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [verificationSent, setVerificationSent] = useState(false);
   const [passwordResetRequested, setPasswordResetRequested] = useState(false);
@@ -23,13 +24,22 @@ export default function Auth() {
           email,
           password,
           ...(registering && name ? { name } : {}),
+          ...(registering ? { accepted_terms: acceptedTerms } : {}),
         }
       ),
-    onSuccess: async () => {
+    onSuccess: async (data) => {
       setPassword("");
       if (registering) {
-        setVerificationSent(true);
-        setMessage("Se a conta puder ser criada, enviaremos instruções para confirmar o e-mail.");
+        if ("workspaces" in data && data.workspaces) {
+          // cadastro instantâneo: já entrou (fluxo padrão de app)
+          setMessage(null);
+          await queryClient.invalidateQueries({ queryKey: ["auth"] });
+        } else {
+          setVerificationSent(true);
+          setMessage(
+            "Conta criada! Enviamos um código para o seu e-mail só para confirmar que ele existe."
+          );
+        }
       } else {
         setMessage(null);
         await queryClient.invalidateQueries({ queryKey: ["auth"] });
@@ -202,6 +212,38 @@ export default function Auth() {
               </span>
             )}
           </label>
+          {registering && (
+            <label className="flex items-start gap-2 text-sm text-stone-700">
+              <input
+                type="checkbox"
+                required
+                checked={acceptedTerms}
+                onChange={(event) => setAcceptedTerms(event.target.checked)}
+                className="mt-1"
+              />
+              <span>
+                Li e aceito os{" "}
+                <a
+                  href="https://antigomundonovo.github.io/terms.html"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-amber-800 underline"
+                >
+                  Termos de Uso
+                </a>{" "}
+                e a{" "}
+                <a
+                  href="https://antigomundonovo.github.io/privacy.html"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-amber-800 underline"
+                >
+                  Política de Privacidade
+                </a>
+                .
+              </span>
+            </label>
+          )}
           {auth.isError && (
             <p role="alert" className="rounded bg-red-50 p-3 text-sm text-red-800">
               {(auth.error as Error).message}
@@ -210,7 +252,7 @@ export default function Auth() {
           {message && <p role="status" className="text-sm text-stone-600">{message}</p>}
           <button
             type="submit"
-            disabled={auth.isPending}
+            disabled={auth.isPending || (registering && !acceptedTerms)}
             className="w-full rounded bg-stone-900 px-4 py-2 font-medium text-white hover:bg-stone-700 disabled:opacity-50"
           >
             {auth.isPending ? "Aguarde…" : registering ? "Criar conta" : "Entrar"}
