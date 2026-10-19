@@ -145,18 +145,76 @@ confirmada no sistema depois de feita. Matriz de capacidades e requisitos:
 
 ## Conta e sessão
 
-Na interface, crie uma conta com e-mail e senha de pelo menos 12 caracteres.
-Cada cadastro recebe um workspace privado e precisa confirmar o e-mail antes
-de entrar. Configure `SMTP_HOST`, `SMTP_FROM_EMAIL` e, se exigido pelo servidor,
-`SMTP_USERNAME`/`SMTP_PASSWORD` no `.env`; mensagens usam STARTTLS por padrão
-(`SMTP_USE_SSL=true` habilita TLS implícito, normalmente na porta 465).
+O autorregistro (`POST /api/v1/auth/register`) só funciona com
+`APP_ENV=development` ou `test`; nos demais ambientes retorna **503**, com ou
+sem SMTP. Mantenha a aplicação local em `127.0.0.1`: esse controle depende de
+configuração de ambiente, não de uma verificação de que o cliente é local.
+Não use `development` para contornar o bloqueio em produção.
+
+Na interface, informe e-mail, senha de pelo menos 12 caracteres e aceite os
+Termos de Uso e a Política de Privacidade (`accepted_terms=true`). A aceitação
+registra data e versão. Cada novo cadastro cria workspace privado e perfil.
+
+| Configuração local | Resultado do cadastro | Como acessar |
+|---|---|---|
+| Sem SMTP (deixe `SMTP_HOST` e `SMTP_FROM_EMAIL` vazios) | Conta marcada como verificada; HTTP 200, cookie e contexto de sessão | Acesso imediato; em acessos posteriores, entrar com e-mail e senha |
+| Com `SMTP_HOST` **e** `SMTP_FROM_EMAIL` preenchidos | Conta não verificada; HTTP 202, sem sessão; envio em segundo plano | Abrir o link recebido, confirmar e então entrar com e-mail e senha |
+
+A seleção do fluxo verifica apenas a presença dessas duas variáveis, não a
+entrega de mensagens. SMTP parcial é configuração inválida para operação:
+preencha ambos para testar e-mail. Falha de entrega não libera acesso imediato;
+verifique o serviço e solicite novo link em `/api/v1/auth/verification/request`.
+A resposta 202 é genérica e não comprova envio nem criação de conta (inclusive
+para endereço já cadastrado). O link de confirmação vale 24 horas, é de uso
+único e não cria sessão; `/api/v1/auth/verification/confirm` confirma o token.
+
+Configure também `FRONTEND_BASE_URL` e as origens permitidas em `CORS_ORIGINS`.
+Se exigidos pelo servidor, defina `SMTP_USERNAME`/`SMTP_PASSWORD`. Mensagens usam
+STARTTLS por padrão; para TLS implícito, use `SMTP_USE_SSL=true` e a porta
+correspondente (normalmente 465). Recuperação de senha por link de uso único
+requer SMTP funcional, inclusive para contas locais criadas sem SMTP.
+
 A sessão usa cookie HttpOnly com expiração de 12 horas; **Sair** a revoga.
-Há fluxo de redefinição de senha por link de uso único. Endpoints de dados
-exigem sessão válida e membership no workspace. Ainda não há conexão OAuth
-com redes/plataformas; não exponha auto-cadastro publicamente até adicionar
-rate limiting compartilhado entre processos e MFA. Em produção, use
-`FRONTEND_BASE_URL` com HTTPS e configure o SMTP com STARTTLS ou TLS implícito
-(`SMTP_USE_SSL=true`).
+Endpoints de dados exigem sessão válida e membership no workspace.
+As credenciais sociais são separadas da conta URDIA: o Instagram usa token
+configurado no backend; isso não equivale a um fluxo OAuth de Instagram na UI.
+O TikTok possui rotas OAuth próprias, sujeitas às condições da
+[matriz de capacidades](docs/PLATFORM_CAPABILITIES.md).
+
+Em produção, mantenha o autorregistro desabilitado, use
+`FRONTEND_BASE_URL` com HTTPS e SMTP criptografado. Cadastro público continua
+condicionado a trabalho adicional de segurança, incluindo rate limiting
+compartilhado entre processos e MFA; configurar SMTP não remove esse bloqueio.
+
+### Primeira publicação no Instagram
+
+1. Prepare o conteúdo, identifique os direitos, conclua QC e aprovação humana
+   e exporte o pacote pelo fluxo normal. Use a publicação `PENDING` criada
+   nesse fluxo, no workspace/perfil da sessão; não crie registros manualmente.
+2. Configure `META_INSTAGRAM_TOKEN` no `.env` do backend com token válido e
+   permissões oficiais de publicação para a conta desejada. Registre a
+   expiração em `META_INSTAGRAM_TOKEN_EXPIRES_AT` e renove antes de vencer.
+   `META_APP_ID`/`META_APP_SECRET` pertencem à configuração do app; não substituem
+   o token. Reinicie os processos após alterar o ambiente.
+3. Hospede as imagens em URLs acessíveis pela Meta. Envie `public_image_urls`
+   na ordem desejada; se omitidas, a rota tenta hospedar as imagens exportadas
+   usando o asset host configurado. Caminhos locais não funcionam.
+4. Após revisar conta, legenda e mídias, a ação humana de publicação chama
+   `POST /api/v1/publications/{id}/publish?workspace_id=<uuid>` com sessão
+   autenticada e corpo `{"profile_id":"<uuid>","public_image_urls":["https://host/imagem.jpg"]}`.
+   Foto usa uma imagem; carrossel usa 2–10. A legenda vem do último rascunho
+   (título + legenda); `caption_override`, se usado, também exige revisão.
+5. Confira `status=PUBLISHED`, `remote_id` e o post na conta correta; o permalink
+   pode estar ausente mesmo após sucesso. A API aguarda o container ficar
+   pronto antes de publicar. Em falha, confira o estado local e a conta remota
+   antes de tentar novamente, pois a chave local não garante deduplicação na Meta.
+
+Sem credenciais ou hospedagem pública, utilize o kit manual do export e,
+somente depois de postar, registre a confirmação em
+`POST /api/v1/publications/{id}/confirm`. Essa confirmação registra uma postagem
+manual; não é a chamada que envia conteúdo à API do Instagram.
+A validação real de 04/10/2026 registrada na matriz é histórica; não comprova
+que o token atual esteja válido nem que outro ambiente esteja habilitado.
 
 ## Segurança obrigatória
 
